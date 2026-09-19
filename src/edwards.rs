@@ -1320,51 +1320,6 @@ mod test {
         assert_eq!(bp16.compress(), BASE16_CMPRSSD);
     }
 
-    /// Check that mul_base_clamped and mul_clamped agree
-    #[test]
-    fn mul_base_clamped() {
-        let mut csprng = rand::rng();
-
-        // Make a random curve point in the curve. Give it torsion to make things interesting.
-        let random_point = {
-            let mut b = [0u8; 32];
-            csprng.fill_bytes(&mut b);
-            EdwardsPoint::mul_base_clamped(b) + constants::EIGHT_TORSION[1]
-        };
-        // Make a basepoint table from the random point. We'll use this with mul_base_clamped
-        let random_table = EdwardsBasepointTableRadix256::create(&random_point);
-
-        // Now test scalar mult. agreement on the default basepoint as well as random_point
-
-        // Test that mul_base_clamped and mul_clamped agree on a large integer. Even after
-        // clamping, this integer is not reduced mod l.
-        let a_bytes = [0xff; 32];
-        assert_eq!(
-            EdwardsPoint::mul_base_clamped(a_bytes),
-            constants::ED25519_BASEPOINT_POINT.mul_clamped(a_bytes)
-        );
-        assert_eq!(
-            random_table.mul_base_clamped(a_bytes),
-            random_point.mul_clamped(a_bytes)
-        );
-
-        // Test agreement on random integers
-        for _ in 0..100 {
-            // This will be reduced mod l with probability l / 2^256 ≈ 6.25%
-            let mut a_bytes = [0u8; 32];
-            csprng.fill_bytes(&mut a_bytes);
-
-            assert_eq!(
-                EdwardsPoint::mul_base_clamped(a_bytes),
-                constants::ED25519_BASEPOINT_POINT.mul_clamped(a_bytes)
-            );
-            assert_eq!(
-                random_table.mul_base_clamped(a_bytes),
-                random_point.mul_clamped(a_bytes)
-            );
-        }
-    }
-
     #[test]
     fn impl_sum() {
         // Test that sum works for non-empty iterators
@@ -1494,56 +1449,6 @@ mod test {
             assert_eq!(result.compress(), DOUBLE_SCALAR_MULT_RESULT);
         }
 
-        #[test]
-        fn triple_scalar_mul_basepoint_accepts_full_width_scalars() {
-            let mut a1_bytes = [0u8; 32];
-            a1_bytes[0] = 7;
-            a1_bytes[16] = 1;
-            let a1 = Scalar::from_canonical_bytes(a1_bytes).unwrap();
-
-            let mut a2_bytes = [0u8; 32];
-            a2_bytes[0] = 11;
-            a2_bytes[24] = 1;
-            let a2 = Scalar::from_canonical_bytes(a2_bytes).unwrap();
-
-            let b = B_SCALAR;
-            let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(17u64);
-            let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(19u64);
-
-            let result = EdwardsPoint::vartime_triple_scalar_mul_basepoint(&a1, &A1, &a2, &A2, &b);
-            let expected = (a1 * A1) + (a2 * A2) + EdwardsPoint::mul_base(&b);
-
-            assert_eq!(result, expected);
-        }
-
-        #[test]
-        fn multiscalar_mul_vs_ed25519py() {
-            let A = A_TIMES_BASEPOINT
-                .decompress()
-                .expect("test point should decompress");
-            let result = EdwardsPoint::vartime_multiscalar_mul(
-                &[A_SCALAR, B_SCALAR],
-                &[A, constants::ED25519_BASEPOINT_POINT],
-            );
-            assert_eq!(result.compress(), DOUBLE_SCALAR_MULT_RESULT);
-        }
-
-        #[test]
-        fn multiscalar_mul_vartime_vs_consttime() {
-            let A = A_TIMES_BASEPOINT
-                .decompress()
-                .expect("test point should decompress");
-            let result_vartime = EdwardsPoint::vartime_multiscalar_mul(
-                &[A_SCALAR, B_SCALAR],
-                &[A, constants::ED25519_BASEPOINT_POINT],
-            );
-            let result_consttime = EdwardsPoint::multiscalar_mul(
-                &[A_SCALAR, B_SCALAR],
-                &[A, constants::ED25519_BASEPOINT_POINT],
-            );
-
-            assert_eq!(result_vartime.compress(), result_consttime.compress());
-        }
     }
 
 

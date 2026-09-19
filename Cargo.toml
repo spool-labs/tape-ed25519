@@ -24,6 +24,9 @@ curve25519-dalek-derive = "0.1.1"
 
 [dev-dependencies]
 ed25519-dalek = "2.1"
+hex = "0.4"
+proptest = "1.6"
+rand = "0.10.2"
 solana-ed25519 = "=0.2.4"
 
 [lints.rust.unexpected_cfgs]
