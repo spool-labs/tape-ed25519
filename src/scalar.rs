@@ -1605,7 +1605,7 @@ pub mod test {
         let mut state = 0x5EED_1EE5_u64;
         for _ in 0..4096 {
             let mut v = [0u8; 64];
-            for chunk in v.chunks_exact_mut(8) {
+            for chunk in v.as_chunks_mut::<8>().0 {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
