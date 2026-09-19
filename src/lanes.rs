@@ -52,8 +52,8 @@ const DIGIT_DOUBLINGS: usize = 4;
 
 /// Whether the lane path beats the single-signature verifier on this host
 ///
-/// AArch64 is excluded even though NEON kernels exist for it: a NEON multiply needs as many
-/// widening multiplies per lane as a serial one.
+/// Only AVX-512 IFMA does. A NEON multiply needs as many widening multiplies per lane as a serial
+/// one, so the fork's NEON kernels stayed behind and AArch64 verifies one signature at a time.
 pub fn is_lane_engine_available() -> bool {
     #[cfg(curve25519_backend = "simd")]
     {
