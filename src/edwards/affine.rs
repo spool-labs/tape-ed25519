@@ -1,10 +1,9 @@
 use super::{CompressedEdwardsY, EdwardsPoint};
-use crate::traits::Identity;
 use crate::field::FieldElement;
 use crate::scalar::Scalar;
+use crate::traits::Identity;
 use core::ops::Mul;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
-
 
 /// Affine Edwards point on untwisted curve.
 #[derive(Copy, Clone, Debug)]
@@ -50,7 +49,6 @@ impl PartialEq for AffinePoint {
 }
 
 impl Eq for AffinePoint {}
-
 
 impl AffinePoint {
     /// Convert to extended coordinates.

@@ -2,7 +2,7 @@
 
 #![allow(non_snake_case)]
 
-use super::field_x8::{FieldElementX8, LANES, LaneMask, sqrt_ratio_i_x8};
+use super::field_x8::{sqrt_ratio_i_x8, FieldElementX8, LaneMask, LANES};
 use crate::backend::serial::u64::constants::{EDWARDS_D, EDWARDS_D2};
 #[cfg(test)]
 use crate::edwards::EdwardsPoint;
@@ -335,7 +335,11 @@ mod test {
                 EdwardsPoint::identity()
             } else {
                 let m = ps[l] * Scalar::from(digits[l].unsigned_abs() as u64);
-                if digits[l] < 0 { -m } else { m }
+                if digits[l] < 0 {
+                    -m
+                } else {
+                    m
+                }
             };
             assert_eq!(
                 selected.lane(l).compress(),

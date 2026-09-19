@@ -26,7 +26,9 @@ fn zip215_verdict(key: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> bool 
 /// What the pre-ZIP-215 rules say about one case, through `ed25519-dalek`
 fn strict_verdict(key: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> bool {
     ed25519_dalek::VerifyingKey::from_bytes(key)
-        .and_then(|key| key.verify_strict(message, &ed25519_dalek::Signature::from_bytes(signature)))
+        .and_then(|key| {
+            key.verify_strict(message, &ed25519_dalek::Signature::from_bytes(signature))
+        })
         .is_ok()
 }
 
@@ -101,7 +103,8 @@ fn low_order_forgeries() {
             // The bare verification equation, the order tests taken out.
             let k = challenge(&r_bytes, &key_bytes, &message);
             let expected_r =
-                EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &negated(&key), &s).compress();
+                EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &negated(&key), &s)
+                    .compress();
             if expected_r.as_bytes() != &r_bytes {
                 continue;
             }

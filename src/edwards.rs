@@ -94,20 +94,15 @@ use core::ops::{Add, Neg, Sub};
 use core::ops::{AddAssign, SubAssign};
 use core::ops::{Mul, MulAssign};
 
-
-
-
 use subtle::Choice;
 use subtle::ConditionallyNegatable;
 use subtle::ConditionallySelectable;
 use subtle::ConstantTimeEq;
 
-
 use crate::constants;
 
 use crate::field::FieldElement;
-use crate::scalar::{Scalar, clamp_integer};
-
+use crate::scalar::{clamp_integer, Scalar};
 
 use crate::backend::serial::curve_models::AffineNielsPoint;
 use crate::backend::serial::curve_models::CompletedPoint;
@@ -115,8 +110,8 @@ use crate::backend::serial::curve_models::ProjectiveNielsPoint;
 use crate::backend::serial::curve_models::ProjectivePoint;
 
 use crate::window::{
-    LookupTableRadix16, LookupTableRadix32, LookupTableRadix64, LookupTableRadix128,
-    LookupTableRadix256,
+    LookupTableRadix128, LookupTableRadix16, LookupTableRadix256, LookupTableRadix32,
+    LookupTableRadix64,
 };
 
 use crate::traits::BasepointTable;
@@ -167,7 +162,7 @@ impl CompressedEdwardsY {
     }
 
     /// Copy this `CompressedEdwardsY` to an array of bytes.
-    pub const fn to_bytes(&self) -> [u8; 32] {
+    pub const fn to_bytes(self) -> [u8; 32] {
         self.0
     }
 
@@ -240,11 +235,6 @@ impl TryFrom<&[u8]> for CompressedEdwardsY {
 // structs containing `EdwardsPoint`s and use Serde's derived
 // serializers to serialize those structures.
 
-
-
-
-
-
 // ------------------------------------------------------------------------
 // Internal point representations
 // ------------------------------------------------------------------------
@@ -310,8 +300,6 @@ impl Default for EdwardsPoint {
 // ------------------------------------------------------------------------
 // Zeroize implementations for wiping points from memory
 // ------------------------------------------------------------------------
-
-
 
 // ------------------------------------------------------------------------
 // Validity checks (for debugging, not CT)
@@ -436,10 +424,6 @@ impl EdwardsPoint {
             })
             .collect()
     }
-
-
-
-
 }
 
 // ------------------------------------------------------------------------
@@ -581,7 +565,6 @@ impl EdwardsPoint {
     /// Uses precomputed basepoint tables when the `precomputed-tables` feature
     /// is enabled, trading off increased code size for ~4x better performance.
     pub fn mul_base(scalar: &Scalar) -> Self {
-
         {
             scalar * constants::ED25519_BASEPOINT_TABLE
         }
@@ -632,7 +615,6 @@ impl EdwardsPoint {
     ) -> EdwardsPoint {
         crate::backend::vartime_double_base_mul(a, A, b)
     }
-
 }
 
 macro_rules! impl_basepoint_table {
@@ -1002,41 +984,6 @@ impl Debug for EdwardsPoint {
 // group traits
 // ------------------------------------------------------------------------
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ------------------------------------------------------------------------
 // Tests
 // ------------------------------------------------------------------------
@@ -1044,7 +991,6 @@ impl Debug for EdwardsPoint {
 #[cfg(test)]
 mod test {
     use super::*;
-    use rand::Rng;
 
     use crate::constants::ED25519_BASEPOINT_TABLE;
 
@@ -1386,7 +1332,6 @@ mod test {
         }
     }
 
-
     #[test]
     fn is_identity() {
         assert!(EdwardsPoint::identity().is_identity());
@@ -1424,15 +1369,8 @@ mod test {
         assert!(P1.compress().to_bytes() == P2.compress().to_bytes());
     }
 
-
     // Use different multiscalar sizes to hit different internal
     // parameters.
-
-
-
-
-
-
 
     mod vartime {
         use super::super::*;
@@ -1448,12 +1386,5 @@ mod test {
                 EdwardsPoint::vartime_double_scalar_mul_basepoint(&A_SCALAR, &A, &B_SCALAR);
             assert_eq!(result.compress(), DOUBLE_SCALAR_MULT_RESULT);
         }
-
     }
-
-
-
-
-
-
 }

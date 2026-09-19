@@ -27,8 +27,6 @@ use subtle::ConstantTimeEq;
 use crate::backend;
 use crate::constants;
 
-
-
 /// A `FieldElement` represents an element of the field
 /// \\( \mathbb Z / (2\^{255} - 19)\\).
 ///
@@ -59,7 +57,6 @@ impl Default for FieldElement {
 }
 
 impl FieldElement {
-
     /// Determine if this `FieldElement` is negative, in the sense
     /// used in the ed25519 paper: `x` is negative if the low bit is
     /// set.
@@ -131,7 +128,6 @@ impl FieldElement {
         let mut scratch = vec![FieldElement::ONE; n];
 
         Self::internal_invert_batch(inputs, &mut scratch);
-
     }
 
     /// Given a slice of public `FieldElements`, replace each with its inverse. `scratch` can
@@ -159,7 +155,6 @@ impl FieldElement {
             #[allow(unused_mut)]
             let mut product = &acc * input;
             acc.conditional_assign(&product, !input.is_zero());
-
         }
 
         // acc is nonzero because we skipped zeros in inputs
@@ -180,9 +175,7 @@ impl FieldElement {
             let nz = !input.is_zero();
             input.conditional_assign(&inverse, nz);
             acc.conditional_assign(&tmp, nz);
-
         }
-
     }
 
     /// Given a nonzero field element, compute its inverse.
@@ -293,9 +286,7 @@ impl FieldElement {
     pub fn invsqrt(&self) -> (Choice, FieldElement) {
         FieldElement::sqrt_ratio_i(&FieldElement::ONE, self)
     }
-
 }
-
 
 #[cfg(test)]
 mod test {
@@ -513,12 +504,4 @@ mod test {
     // print("SET 2: Input bytes are length 48")
     // for _ in range(5):
     //     print(gen_example(48))
-
-
-
-
-
-
-
-
 }

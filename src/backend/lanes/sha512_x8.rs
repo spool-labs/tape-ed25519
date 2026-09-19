@@ -312,12 +312,7 @@ impl Staged {
     /// Block `b`'s source pointer per lane, and the mask of lanes still inside
     /// their stream. Spent lanes read `zero` and are masked out of the update.
     #[inline]
-    fn block(
-        &self,
-        msgs: &[&[u8]; LANES],
-        b: usize,
-        zero: *const u8,
-    ) -> ([*const u8; LANES], u8) {
+    fn block(&self, msgs: &[&[u8]; LANES], b: usize, zero: *const u8) -> ([*const u8; LANES], u8) {
         let mut active: u8 = 0;
         let mut block = [zero; LANES];
         for l in 0..LANES {
@@ -541,8 +536,11 @@ mod test {
         }
     }
 
-    /// One group of eight random lanes: `(r, a, messages)`.
-    fn random_group(rng: &mut Rng) -> ([[u8; 32]; LANES], [[u8; 32]; LANES], Vec<Vec<u8>>) {
+    /// The `R` and `A` encodings of eight lanes, and the message each one covers
+    type Group = ([[u8; 32]; LANES], [[u8; 32]; LANES], Vec<Vec<u8>>);
+
+    /// One group of eight random lanes
+    fn random_group(rng: &mut Rng) -> Group {
         let r: [[u8; 32]; LANES] = core::array::from_fn(|_| rng.fill32());
         let a: [[u8; 32]; LANES] = core::array::from_fn(|_| rng.fill32());
         let msgs: Vec<Vec<u8>> = (0..LANES)

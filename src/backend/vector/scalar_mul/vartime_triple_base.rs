@@ -25,8 +25,8 @@ pub mod spec {
     use crate::backend::vector::ifma::constants::BASEPOINT_ODD_LOOKUP_TABLE;
 
     use crate::edwards::EdwardsPoint;
-    use crate::scalar::HEEA_MAX_INDEX;
     use crate::scalar::Scalar;
+    use crate::scalar::HEEA_MAX_INDEX;
     #[allow(unused_imports)]
     use crate::traits::Identity;
     use crate::window::NafLookupTable5;

@@ -120,7 +120,6 @@ use core::ops::{Add, Neg, Sub};
 use subtle::Choice;
 use subtle::ConditionallySelectable;
 
-
 use crate::constants;
 
 use crate::edwards::EdwardsPoint;
@@ -176,7 +175,6 @@ pub struct AffineNielsPoint {
     pub xy2d: FieldElement,
 }
 
-
 /// A pre-computed point on the \\( \mathbb P\^3 \\) model for the
 /// curve, represented as \\((Y+X, Y-X, Z, 2dXY)\\) in "Niels coordinates".
 ///
@@ -190,7 +188,6 @@ pub struct ProjectiveNielsPoint {
     pub Z: FieldElement,
     pub T2d: FieldElement,
 }
-
 
 // ------------------------------------------------------------------------
 // Constructors

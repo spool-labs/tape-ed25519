@@ -10,7 +10,10 @@ fn bytes(text: &str) -> alloc::vec::Vec<u8> {
         .bytes()
         .map(|c| (c as char).to_digit(16).expect("a hex digit") as u8)
         .collect();
-    digits.chunks(2).map(|pair| pair[0] << 4 | pair[1]).collect()
+    digits
+        .chunks(2)
+        .map(|pair| pair[0] << 4 | pair[1])
+        .collect()
 }
 
 /// One vector: the key accepts its own signature over the message
@@ -22,7 +25,11 @@ fn accepts(key_text: &str, signature_text: &str, message_text: &str) {
 
     let checked = verify(&key, &signature, &message);
 
-    assert!(checked.is_ok(), "RFC 8032 vector refused: {}", hex(&message));
+    assert!(
+        checked.is_ok(),
+        "RFC 8032 vector refused: {}",
+        hex(&message)
+    );
 }
 
 // the empty-message vector verifies

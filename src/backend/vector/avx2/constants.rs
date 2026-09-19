@@ -27,7 +27,6 @@ pub static CACHEDPOINT_IDENTITY: CachedPoint = CachedPoint(FieldElement2625x4([
     u32x8::new_const(67108863, 0, 33554431, 0, 0, 67108863, 0, 33554431),
 ]));
 
-
 /// Odd multiples `[B', 3B', ..., 127B']` of `B' = B * 2^128`, where `B` is the
 /// Ed25519 basepoint.
 ///
@@ -1161,7 +1160,6 @@ mod test {
             assert_same_cached_point(static_point, runtime_point, i);
         }
     }
-
 }
 
 /// The low limbs of (2p, 2p, 2p, 2p), so that

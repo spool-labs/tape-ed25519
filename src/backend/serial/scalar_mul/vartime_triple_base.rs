@@ -12,7 +12,7 @@ use core::cmp::Ordering;
 use crate::backend::serial::curve_models::{ProjectiveNielsPoint, ProjectivePoint};
 use crate::constants;
 use crate::edwards::EdwardsPoint;
-use crate::scalar::{HEEA_MAX_INDEX, Scalar};
+use crate::scalar::{Scalar, HEEA_MAX_INDEX};
 use crate::traits::Identity;
 use crate::window::NafLookupTable5;
 

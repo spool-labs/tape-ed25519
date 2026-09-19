@@ -208,8 +208,14 @@ fn matches_zebra() {
             hex(&case.key),
             hex(&case.signature),
         );
-        assert_eq!(batched[index], expected, "verify_batch disagrees at {index}");
-        assert_eq!(laned[index], expected, "the lane pipeline disagrees at {index}");
+        assert_eq!(
+            batched[index], expected,
+            "verify_batch disagrees at {index}"
+        );
+        assert_eq!(
+            laned[index], expected,
+            "the lane pipeline disagrees at {index}"
+        );
         accepted += usize::from(expected);
     }
 

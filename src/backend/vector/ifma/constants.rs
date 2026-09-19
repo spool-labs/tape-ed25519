@@ -4110,7 +4110,6 @@ pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLoo
     ])),
 ]);
 
-
 #[cfg(all(test, target_feature = "avx512ifma"))]
 mod test {
     use super::*;
@@ -4150,7 +4149,6 @@ mod test {
             assert_same_cached_point(static_point, runtime_point, i);
         }
     }
-
 
     #[test]
     fn basepoint_odd_lookup_table_matches_runtime_generation() {

@@ -87,9 +87,7 @@ pub fn verify_batch(items: &[Item<'_>]) -> Vec<bool> {
     // A group's lanes advance to the longest message's block count, so grouping by hash cost keeps
     // a long message from charging the short ones. The index breaks ties, which makes the unstable
     // sort stable in effect.
-    order.sort_unstable_by_key(|&index| {
-        (hash_blocks(items[index as usize].2.len()), index)
-    });
+    order.sort_unstable_by_key(|&index| (hash_blocks(items[index as usize].2.len()), index));
 
     // Two groups at a time while sixteen remain: one hash pass serves both, and adjacent groups in
     // this order cost the same block count.
@@ -144,10 +142,8 @@ fn hash_blocks(message_len: usize) -> u32 {
 /// Verify one full group of eight signatures in lockstep
 fn verify_group(group: &[Item<'_>; LANES]) -> LaneMask {
     let a_bytes: [[u8; VERIFYING_KEY_LENGTH]; LANES] = core::array::from_fn(|lane| group[lane].0);
-    let r_bytes: [[u8; HALF_LENGTH]; LANES] =
-        core::array::from_fn(|lane| *group[lane].1.r_bytes());
-    let s_bytes: [[u8; HALF_LENGTH]; LANES] =
-        core::array::from_fn(|lane| *group[lane].1.s_bytes());
+    let r_bytes: [[u8; HALF_LENGTH]; LANES] = core::array::from_fn(|lane| *group[lane].1.r_bytes());
+    let s_bytes: [[u8; HALF_LENGTH]; LANES] = core::array::from_fn(|lane| *group[lane].1.s_bytes());
     let messages: [&[u8]; LANES] = core::array::from_fn(|lane| group[lane].2);
 
     let k = challenge_scalars(&a_bytes, &r_bytes, &messages);
@@ -206,7 +202,11 @@ fn challenge_scalars_pair(
 
     core::array::from_fn(|group| {
         core::array::from_fn(|lane| {
-            challenge(&r_bytes[group][lane], &a_bytes[group][lane], messages[group][lane])
+            challenge(
+                &r_bytes[group][lane],
+                &a_bytes[group][lane],
+                messages[group][lane],
+            )
         })
     })
 }

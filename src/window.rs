@@ -4,7 +4,6 @@
 
 use core::fmt::Debug;
 
-
 use subtle::Choice;
 use subtle::ConditionallyNegatable;
 use subtle::ConditionallySelectable;
@@ -99,7 +98,6 @@ macro_rules! impl_lookup_table {
                 $name(points)
             }
         }
-
     };
 } // End macro_rules! impl_lookup_table
 
@@ -218,8 +216,7 @@ impl<T: Debug> Debug for NafLookupTable8<T> {
     }
 }
 
-impl NafLookupTable8<AffineNielsPoint> {
-}
+impl NafLookupTable8<AffineNielsPoint> {}
 
 impl<'a> From<&'a EdwardsPoint> for NafLookupTable8<ProjectiveNielsPoint> {
     fn from(A: &'a EdwardsPoint) -> Self {

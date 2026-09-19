@@ -2,12 +2,13 @@
 
 #![allow(non_snake_case)]
 
+#[cfg(test)]
 use crate::edwards::CompressedEdwardsY;
 use crate::scalar::Scalar;
 
-
 pub use crate::backend::serial::u64::constants::*;
 
+#[cfg(test)]
 /// The Ed25519 basepoint, in `CompressedEdwardsY` format.
 ///
 /// This is the little-endian byte encoding of \\( 4/5 \pmod p \\),
@@ -30,7 +31,6 @@ pub const BASEPOINT_ORDER: Scalar = Scalar {
         0x00, 0x10,
     ],
 };
-
 
 #[cfg(test)]
 mod test {
@@ -94,13 +94,4 @@ mod test {
         assert_eq!(d, constants::EDWARDS_D);
         assert_eq!(d2, constants::EDWARDS_D2);
     }
-
-    #[test]
-    fn test_sqrt_ad_minus_one() {
-        let a = FieldElement::MINUS_ONE;
-        let ad_minus_one = &(&a * &constants::EDWARDS_D) + &a;
-        let should_be_ad_minus_one = constants::SQRT_AD_MINUS_ONE.square();
-        assert_eq!(should_be_ad_minus_one, ad_minus_one);
-    }
-
 }

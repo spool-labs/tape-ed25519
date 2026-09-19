@@ -15,7 +15,6 @@ use core::fmt::Debug;
 use core::ops::{Index, IndexMut};
 use subtle::{Choice, ConditionallySelectable};
 
-
 use crate::constants;
 
 /// The `Scalar52` struct represents an element in
@@ -28,7 +27,6 @@ impl Debug for Scalar52 {
         f.write_str("Scalar52{..}")
     }
 }
-
 
 impl Index<usize> for Scalar52 {
     type Output = u64;
@@ -105,10 +103,10 @@ impl Scalar52 {
         lo = Scalar52::montgomery_mul(&lo, &constants::R);  // (lo * R) / R = lo
         hi = Scalar52::montgomery_mul(&hi, &constants::RR); // (hi * R^2) / R = hi * R
 
-        let reduced = Scalar52::add(&hi, &lo);
 
 
-        reduced
+
+        Scalar52::add(&hi, &lo)
     }
 
     /// Pack the limbs of this `Scalar52` into 32 bytes
@@ -300,10 +298,8 @@ impl Scalar52 {
         let mut ab_limbs = Scalar52::mul_internal(a, b);
         let mut ab = Scalar52::montgomery_reduce(&ab_limbs);
         let mut rr_limbs = Scalar52::mul_internal(&ab, &constants::RR);
-        let product = Scalar52::montgomery_reduce(&rr_limbs);
 
-
-        product
+        Scalar52::montgomery_reduce(&rr_limbs)
     }
 
     /// Compute `a^2` (mod l)
@@ -314,10 +310,8 @@ impl Scalar52 {
         let mut aa_limbs = Scalar52::square_internal(self);
         let mut aa = Scalar52::montgomery_reduce(&aa_limbs);
         let mut rr_limbs = Scalar52::mul_internal(&aa, &constants::RR);
-        let square = Scalar52::montgomery_reduce(&rr_limbs);
 
-
-        square
+        Scalar52::montgomery_reduce(&rr_limbs)
     }
 
     /// Compute `(a * b) / R` (mod l), where R is the Montgomery modulus 2^260
@@ -325,10 +319,8 @@ impl Scalar52 {
     #[allow(unused_mut)]
     pub fn montgomery_mul(a: &Scalar52, b: &Scalar52) -> Scalar52 {
         let mut limbs = Scalar52::mul_internal(a, b);
-        let product = Scalar52::montgomery_reduce(&limbs);
 
-
-        product
+        Scalar52::montgomery_reduce(&limbs)
     }
 
     /// Compute `(a^2) / R` (mod l) in Montgomery form, where R is the Montgomery modulus 2^260
@@ -336,10 +328,8 @@ impl Scalar52 {
     #[allow(unused_mut)]
     pub fn montgomery_square(&self) -> Scalar52 {
         let mut limbs = Scalar52::square_internal(self);
-        let square = Scalar52::montgomery_reduce(&limbs);
 
-
-        square
+        Scalar52::montgomery_reduce(&limbs)
     }
 
     /// Puts a Scalar52 in to Montgomery form, i.e. computes `a*R (mod l)`
@@ -356,10 +346,8 @@ impl Scalar52 {
         for i in 0..5 {
             limbs[i] = self[i] as u128;
         }
-        let scalar = Scalar52::montgomery_reduce(&limbs);
 
-
-        scalar
+        Scalar52::montgomery_reduce(&limbs)
     }
 }
 

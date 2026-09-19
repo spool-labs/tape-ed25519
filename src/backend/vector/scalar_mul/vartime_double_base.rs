@@ -43,7 +43,6 @@ pub mod spec {
 
         let table_B = &BASEPOINT_ODD_LOOKUP_TABLE;
 
-
         let mut Q = ExtendedPoint::identity();
 
         loop {

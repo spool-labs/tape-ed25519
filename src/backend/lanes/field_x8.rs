@@ -240,10 +240,7 @@ impl FieldElementX8 {
 ///
 /// Zero-input conventions match the serial `FieldElement::sqrt_ratio_i`:
 /// `(true, 0)` for \\(u = 0\\), `(false, 0)` for \\(v = 0, u \ne 0\\).
-pub fn sqrt_ratio_i_x8(
-    u: &FieldElementX8,
-    v: &FieldElementX8,
-) -> (LaneMask, FieldElementX8) {
+pub fn sqrt_ratio_i_x8(u: &FieldElementX8, v: &FieldElementX8) -> (LaneMask, FieldElementX8) {
     use crate::backend::serial::u64::constants::SQRT_M1;
 
     let sqrt_m1 = FieldElementX8::splat(SQRT_M1);

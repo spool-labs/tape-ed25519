@@ -4,7 +4,6 @@
 
 #![allow(non_snake_case)]
 
-
 use crate::scalar::Scalar;
 use subtle::ConstantTimeEq;
 
@@ -50,7 +49,6 @@ pub trait BasepointTable {
 
     /// Multiply a `scalar` by this precomputed basepoint table, in constant time.
     fn mul_base(&self, scalar: &Scalar) -> Self::Point;
-
 }
 
 /// A trait for decomposing scalars for the HEEA method.

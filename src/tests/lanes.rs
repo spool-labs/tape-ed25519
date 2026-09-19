@@ -174,7 +174,10 @@ fn lanes_are_independent() {
 
     let verdicts = lanes::verify_batch(&items);
 
-    assert_eq!(verdicts, vec![true, false, false, false, false, true, true, true]);
+    assert_eq!(
+        verdicts,
+        vec![true, false, false, false, false, true, true, true]
+    );
     assert_matches_single(&items);
 }
 

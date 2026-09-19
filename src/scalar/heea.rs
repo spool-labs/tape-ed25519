@@ -139,12 +139,22 @@ fn bit_length(mag: &Limbs) -> u32 {
 fn approx(mag: &Limbs, neg: bool, e: u32) -> i64 {
     let limb = (e / 64) as usize;
     let bit = e % 64;
-    let get = |i: usize| -> u64 { if i < 4 { mag[i] } else { 0 } };
+    let get = |i: usize| -> u64 {
+        if i < 4 {
+            mag[i]
+        } else {
+            0
+        }
+    };
     let lo = get(limb);
     let hi = get(limb + 1);
     // the double shift keeps bit == 0 from shifting by 64
     let m = ((lo >> bit) | ((hi << (63 - bit)) << 1)) as i64;
-    if neg { -m } else { m }
+    if neg {
+        -m
+    } else {
+        m
+    }
 }
 
 /// c * v mod 2^256 for a signed c and a two's-complement v.
@@ -226,7 +236,11 @@ fn limbs_to_i256(v: &Limbs) -> I256 {
         bytes[8 * i..8 * i + 8].copy_from_slice(&limb.to_le_bytes());
     }
     let out = I256::from_le_bytes(bytes);
-    if neg { -out } else { out }
+    if neg {
+        -out
+    } else {
+        out
+    }
 }
 
 /// Lehmer-batched variant of [`curve25519_heea_vartime`]: 64-bit approximants drive a
@@ -687,13 +701,7 @@ impl core::ops::Shl<u32> for I256 {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{format, string::String, vec::Vec};
-
     use super::*;
-
-
-
-
 
     // Lehmer batching matches the exact iteration on the degenerate inputs
     #[test]
@@ -716,77 +724,6 @@ mod tests {
             );
         }
     }
-
-
-
-    /// Powers of two and their neighbours, the order minus those, and the
-    /// continued fractions with every quotient one
-    fn adversarial_inputs() -> Vec<(I256, String)> {
-        let order: I256 = (&constants::BASEPOINT_ORDER).into();
-        let mut out = Vec::new();
-        for k in 0..253u32 {
-            let p = I256::ONE << k;
-            out.push((p, format!("2^{k}")));
-            out.push((p.wrapping_sub(I256::ONE), format!("2^{k} - 1")));
-            out.push((p.wrapping_add(I256::ONE), format!("2^{k} + 1")));
-            out.push((order.wrapping_sub(p), format!("L - 2^{k}")));
-        }
-        out.push((order.wrapping_sub(I256::ONE), String::from("L - 1")));
-        let worst: [([u8; 32], &str); 4] = [
-            (
-                [
-                    0x41, 0xae, 0x19, 0xac, 0x97, 0x69, 0x63, 0x62, 0x96, 0x7a, 0x41, 0x5a, 0x82,
-                    0x46, 0xee, 0x4d, 0x83, 0xdc, 0xce, 0x05, 0x06, 0xcc, 0x39, 0x5f, 0xc1, 0xa7,
-                    0xf4, 0x97, 0x9b, 0x77, 0xe3, 0x09,
-                ],
-                "L / phi",
-            ),
-            (
-                [
-                    0x17, 0x6d, 0x41, 0xeb, 0x2d, 0x2f, 0x1c, 0x86, 0xfe, 0x50, 0x89, 0x17, 0x2d,
-                    0x0e, 0x53, 0xec, 0xd3, 0x57, 0xa9, 0x6e, 0x36, 0xb1, 0x2f, 0x8b, 0x90, 0xcc,
-                    0x3b, 0x7f, 0x66, 0x9e, 0xa0, 0x06,
-                ],
-                "L (sqrt 2 - 1)",
-            ),
-            (
-                [
-                    0xa5, 0x4d, 0xfd, 0x09, 0x21, 0xdd, 0x68, 0x6d, 0x83, 0xb7, 0x5c, 0x5f, 0xc3,
-                    0xd7, 0xa4, 0xa1, 0xb8, 0x83, 0x8b, 0x07, 0xd7, 0x42, 0x57, 0xb2, 0x73, 0xaa,
-                    0x4c, 0x58, 0xe8, 0x7a, 0xb6, 0x0b,
-                ],
-                "L (sqrt 3 - 1)",
-            ),
-            (
-                [
-                    0xab, 0x25, 0xdc, 0xb0, 0x82, 0xf9, 0xae, 0xf5, 0x3f, 0x22, 0xb6, 0x48, 0x5c,
-                    0xb3, 0xf0, 0xc6, 0x7c, 0x23, 0x31, 0xfa, 0xf9, 0x33, 0xc6, 0xa0, 0x3e, 0x58,
-                    0x0b, 0x68, 0x64, 0x88, 0x1c, 0x06,
-                ],
-                "L / phi^2",
-            ),
-        ];
-        for (bytes, name) in worst {
-            let v = I256::from_le_bytes(bytes);
-            out.push((v, String::from(name)));
-            out.push((order.wrapping_sub(v), format!("L - {name}")));
-        }
-        // Inputs where the Lehmer decisions differ from the exact iteration.
-        for (i, hex) in [
-            "af1370691950b4ba48f843f56a184c17b86d2ed4f3daf71d635f6c4b62180901",
-            "b2eeb012a9c4b893ef63a636c25f5ef0e834febe78fb989181f291d3596e1609",
-            "175cba224d81437c6fcd34c7854ad2ee351f4ea6cfc7c2494beef5b5a797d90b",
-        ]
-        .iter()
-        .enumerate()
-        {
-            let mut bytes = [0u8; 32];
-            bytes.copy_from_slice(&hex::decode(hex).expect("hex"));
-            out.push((I256::from_le_bytes(bytes), format!("divergent {i}")));
-        }
-        out
-    }
-
 
     #[test]
     fn test_heea_edge_cases() {

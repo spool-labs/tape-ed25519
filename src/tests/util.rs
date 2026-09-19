@@ -125,7 +125,11 @@ pub fn low_order_encodings() -> Vec<[u8; 32]> {
     assert_eq!(encodings.len(), LOW_ORDER_COUNT);
     for encoding in &encodings {
         let point = CompressedEdwardsY(*encoding).decompress().expect("decodes");
-        assert!(point.is_small_order(), "{} is not small order", hex(encoding));
+        assert!(
+            point.is_small_order(),
+            "{} is not small order",
+            hex(encoding)
+        );
     }
     encodings
 }

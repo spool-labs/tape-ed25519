@@ -110,18 +110,14 @@ use core::ops::{Add, AddAssign};
 use core::ops::{Mul, MulAssign};
 use core::ops::{Sub, SubAssign};
 
-
-
-
 use subtle::Choice;
 use subtle::ConditionallySelectable;
 use subtle::ConstantTimeEq;
 use subtle::CtOption;
 
-
 use crate::backend;
 use crate::constants;
-use crate::scalar::heea::{I256, curve25519_heea_vartime_lehmer};
+use crate::scalar::heea::{curve25519_heea_vartime_lehmer, I256};
 use crate::traits::HEEADecomposition;
 
 mod heea;
@@ -310,7 +306,6 @@ impl Scalar {
     pub const fn from_canonical_bytes_unchecked(bytes: [u8; 32]) -> Scalar {
         Scalar { bytes }
     }
-
 }
 
 impl Debug for Scalar {
@@ -408,10 +403,8 @@ impl Neg for &Scalar {
         let mut self_R = UnpackedScalar::mul_internal(&self_unpacked, &constants::R);
         #[allow(unused_mut)]
         let mut self_mod_l = UnpackedScalar::montgomery_reduce(&self_R);
-        let negated = UnpackedScalar::sub(&UnpackedScalar::ZERO, &self_mod_l).pack();
 
-
-        negated
+        UnpackedScalar::sub(&UnpackedScalar::ZERO, &self_mod_l).pack()
     }
 }
 
@@ -432,9 +425,6 @@ impl ConditionallySelectable for Scalar {
         Scalar { bytes }
     }
 }
-
-
-
 
 impl<T> Product<T> for Scalar
 where
@@ -537,7 +527,6 @@ impl From<&Scalar> for I256 {
     }
 }
 
-
 impl HEEADecomposition for Scalar {
     /// Generate approximately half-size non-negative scalars `(rho, tau)` for a
     /// given challenge scalar `h`.
@@ -585,9 +574,6 @@ impl Scalar {
         ],
     };
 
-
-
-
     /// Convert this `Scalar` to its underlying sequence of bytes.
     ///
     /// # Example
@@ -599,7 +585,7 @@ impl Scalar {
     ///
     /// assert!(s.to_bytes() == [0u8; 32]);
     /// ```
-    pub const fn to_bytes(&self) -> [u8; 32] {
+    pub const fn to_bytes(self) -> [u8; 32] {
         self.bytes
     }
 
@@ -660,10 +646,8 @@ impl Scalar {
         let mut unpacked = self.unpack();
         #[allow(unused_mut)]
         let mut inverse = unpacked.invert();
-        let scalar = inverse.pack();
 
-
-        scalar
+        inverse.pack()
     }
 
     /// Given a slice of nonzero (possibly secret) `Scalar`s,
@@ -772,7 +756,6 @@ impl Scalar {
             *input = UnpackedScalar::montgomery_mul(&acc, scratch).pack();
             acc = tmp;
         }
-
 
         ret
     }
@@ -1142,10 +1125,8 @@ impl Scalar {
         let mut xR = UnpackedScalar::mul_internal(&x, &constants::R);
         #[allow(unused_mut)]
         let mut x_mod_l = UnpackedScalar::montgomery_reduce(&xR);
-        let scalar = x_mod_l.pack();
 
-
-        scalar
+        x_mod_l.pack()
     }
 
     /// Check whether this `Scalar` is the canonical representative mod \\(\ell\\). This is not
@@ -1219,10 +1200,10 @@ impl UnpackedScalar {
         square_multiply(&mut y,       3, &_101);
         square_multiply(&mut y,   1 + 2, &_11);
 
-        let inverse = y;
 
 
-        inverse
+
+        y
     }
 
     /// Inverts an UnpackedScalar not in Montgomery form.
@@ -1231,16 +1212,10 @@ impl UnpackedScalar {
         let mut montgomery = self.as_montgomery();
         #[allow(unused_mut)]
         let mut inverse = montgomery.montgomery_invert();
-        let result = inverse.from_montgomery();
 
-
-        result
+        inverse.from_montgomery()
     }
 }
-
-
-
-
 
 /// Read one or more u64s stored as little endian bytes.
 ///
@@ -1464,8 +1439,6 @@ pub mod test {
             }
         }
     }
-
-
 
     #[test]
     fn from_u64() {
@@ -1760,7 +1733,6 @@ pub mod test {
         ));
     }
 
-
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
@@ -1911,8 +1883,6 @@ pub mod test {
         let sx = Scalar::from(x);
         assert_eq!(sx + s1, Scalar::from(x + 1));
     }
-
-
 
     #[test]
     #[should_panic]

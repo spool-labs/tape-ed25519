@@ -525,10 +525,10 @@ pub unsafe fn pow2k_x8(a: &FieldElementX8, k: u32) -> FieldElementX8 {
 
 pub mod fused {
     use super::*;
-    use crate::backend::lanes::GroupDigits;
     use crate::backend::lanes::edwards_x8::{ExtendedPointX8, LookupTableX8, ProjectiveNielsX8};
-    use crate::backend::lanes::field_x8::{FieldElementX8, LANES, LaneMask};
-    use crate::backend::lanes::joint::{JOINT_TABLE_B, JointTable};
+    use crate::backend::lanes::field_x8::{FieldElementX8, LaneMask, LANES};
+    use crate::backend::lanes::joint::{JointTable, JOINT_TABLE_B};
+    use crate::backend::lanes::GroupDigits;
     use crate::backend::serial::u64::constants::{EDWARDS_D, EDWARDS_D2, SQRT_M1};
     use crate::backend::serial::u64::field::FieldElement51;
 
