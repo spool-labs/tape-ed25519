@@ -4,7 +4,7 @@
 //! the single verifier, so the batch rows there measure that the dispatch costs nothing; the lane
 //! gain shows up only on a host that has the vector unit.
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use ed25519_dalek::Signer;
 
 use tape_ed25519::batch::verify_batch;
@@ -35,7 +35,7 @@ fn signed(count: usize) -> Vec<([u8; 32], [u8; 64], Vec<u8>)> {
     items
 }
 
-/// One item through the crates.io verifier
+/// One item through the crates.io verifier, the key decoded as part of the call
 fn zebra_verify(key: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> bool {
     let signature = solana_ed25519::ed_sigs::Signature::from_bytes(signature);
     solana_ed25519::ed_sigs::VerificationKey::try_from(*key)
@@ -49,12 +49,17 @@ fn single(criterion: &mut Criterion) {
     let key = VerifyingKey::from_bytes(encoded).expect("a key from the signer decodes");
     let parsed = Signature::from_bytes(signature);
 
+    // Both keys are decompressed up front, so the row measures the equation and nothing else.
+    let zebra_key = solana_ed25519::ed_sigs::VerificationKey::try_from(*encoded)
+        .expect("the same key decodes for the crates.io verifier");
+    let zebra_signature = solana_ed25519::ed_sigs::Signature::from_bytes(signature);
+
     let mut group = criterion.benchmark_group("verify");
     group.bench_function("tape-ed25519", |bencher| {
         bencher.iter(|| verify(&key, &parsed, message).is_ok())
     });
     group.bench_function("solana-ed25519", |bencher| {
-        bencher.iter(|| zebra_verify(encoded, signature, message))
+        bencher.iter(|| zebra_key.verify_zebra(&zebra_signature, message).is_ok())
     });
     group.finish();
 }
@@ -76,11 +81,7 @@ fn batched(criterion: &mut Criterion) {
         let mut group = criterion.benchmark_group(format!("verify_batch/{count}"));
         group.throughput(criterion::Throughput::Elements(count as u64));
         group.bench_function("tape-ed25519", |bencher| {
-            bencher.iter_batched(
-                || (),
-                |()| verify_batch(&prepared),
-                BatchSize::SmallInput,
-            )
+            bencher.iter(|| verify_batch(&prepared))
         });
         group.bench_function("solana-ed25519", |bencher| {
             bencher.iter(|| {
