@@ -51,7 +51,7 @@ use super::field::{FieldElement2625x4, Lanes, Shuffle};
 /// The coefficients of an `ExtendedPoint` are bounded with
 /// \\( b < 0.007 \\).
 #[derive(Copy, Clone, Debug)]
-pub struct ExtendedPoint(pub(super) FieldElement2625x4);
+pub struct ExtendedPoint(pub FieldElement2625x4);
 
 #[unsafe_target_feature("avx2")]
 impl From<edwards::EdwardsPoint> for ExtendedPoint {
@@ -182,7 +182,7 @@ impl ExtendedPoint {
 /// As long as the `CachedPoint` is not repeatedly negated, its
 /// coefficients will be bounded with \\( b < 1.0 \\).
 #[derive(Copy, Clone, Debug)]
-pub struct CachedPoint(pub(super) FieldElement2625x4);
+pub struct CachedPoint(pub FieldElement2625x4);
 
 #[unsafe_target_feature("avx2")]
 impl From<ExtendedPoint> for CachedPoint {

@@ -8,8 +8,8 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 /// Affine Edwards point on untwisted curve.
 #[derive(Copy, Clone, Debug)]
 pub struct AffinePoint {
-    pub(super) x: FieldElement,
-    pub(super) y: FieldElement,
+    pub x: FieldElement,
+    pub y: FieldElement,
 }
 
 impl ConstantTimeEq for AffinePoint {

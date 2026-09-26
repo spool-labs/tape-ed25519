@@ -186,7 +186,7 @@ mod decompress {
     use super::*;
 
     #[rustfmt::skip] // keep alignment of explanatory comments
-    pub(super) fn step_1(
+    pub fn step_1(
         repr: &CompressedEdwardsY,
     ) -> (Choice, FieldElement, FieldElement, FieldElement) {
         let Y = FieldElement::from_bytes(repr.as_bytes());
@@ -200,7 +200,7 @@ mod decompress {
     }
 
     #[rustfmt::skip]
-    pub(super) fn step_2(
+    pub fn step_2(
         repr: &CompressedEdwardsY,
         mut X: FieldElement,
         Y: FieldElement,

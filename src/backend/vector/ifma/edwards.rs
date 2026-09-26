@@ -20,10 +20,10 @@ use super::constants;
 use super::field::{F51x4Reduced, F51x4Unreduced, Lanes, Shuffle};
 
 #[derive(Copy, Clone, Debug)]
-pub struct ExtendedPoint(pub(super) F51x4Unreduced);
+pub struct ExtendedPoint(pub F51x4Unreduced);
 
 #[derive(Copy, Clone, Debug)]
-pub struct CachedPoint(pub(super) F51x4Reduced);
+pub struct CachedPoint(pub F51x4Reduced);
 
 #[unsafe_target_feature("avx512ifma,avx512vl")]
 impl From<edwards::EdwardsPoint> for ExtendedPoint {
