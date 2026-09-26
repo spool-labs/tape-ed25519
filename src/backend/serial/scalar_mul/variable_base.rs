@@ -10,6 +10,9 @@ use crate::scalar::Scalar;
 use crate::traits::Identity;
 use crate::window::LookupTable;
 
+/// Index of the top radix-16 digit of a scalar
+const TOP_DIGIT: usize = 63;
+
 /// Multiply `point` by `scalar` in constant time
 #[rustfmt::skip]
 pub fn mul(point: &EdwardsPoint, scalar: &Scalar) -> EdwardsPoint {
@@ -18,20 +21,20 @@ pub fn mul(point: &EdwardsPoint, scalar: &Scalar) -> EdwardsPoint {
     let scalar_digits = scalar.as_radix_16();
 
     // Peeling the top digit skips sixteen doublings of the identity
-    let mut tmp2;
-    let mut tmp3 = EdwardsPoint::identity();
-    let mut tmp1 = &tmp3 + &lookup_table.select(scalar_digits[63]);
-    for i in (0..63).rev() {
-        tmp2 = tmp1.as_projective();
-        tmp1 = tmp2.double();
-        tmp2 = tmp1.as_projective();
-        tmp1 = tmp2.double();
-        tmp2 = tmp1.as_projective();
-        tmp1 = tmp2.double();
-        tmp2 = tmp1.as_projective();
-        tmp1 = tmp2.double();
-        tmp3 = tmp1.as_extended();
-        tmp1 = &tmp3 + &lookup_table.select(scalar_digits[i]);
+    let mut projective;
+    let mut extended = EdwardsPoint::identity();
+    let mut completed = &extended + &lookup_table.select(scalar_digits[TOP_DIGIT]);
+    for i in (0..TOP_DIGIT).rev() {
+        projective = completed.as_projective();
+        completed = projective.double();
+        projective = completed.as_projective();
+        completed = projective.double();
+        projective = completed.as_projective();
+        completed = projective.double();
+        projective = completed.as_projective();
+        completed = projective.double();
+        extended = completed.as_extended();
+        completed = &extended + &lookup_table.select(scalar_digits[i]);
     }
-    tmp1.as_extended()
+    completed.as_extended()
 }

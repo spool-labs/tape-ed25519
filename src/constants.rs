@@ -9209,157 +9209,69 @@ pub const AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128: NafLookupTable8<AffineNielsPoin
     ]);
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::field::FieldElement;
     use crate::traits::{IsIdentity, ValidityCheck};
 
-    #[test]
-    fn test_eight_torsion() {
-        for torsion_point in &EIGHT_TORSION {
-            let point = torsion_point.mul_by_pow_2(3);
-            assert!(point.is_valid());
-            assert!(point.is_identity());
-        }
-    }
-
-    #[test]
-    fn test_four_torsion() {
-        for i in (0..8).filter(|i| i % 2 == 0) {
-            let point = EIGHT_TORSION[i].mul_by_pow_2(2);
-            assert!(point.is_valid());
-            assert!(point.is_identity());
-        }
-    }
-
-    #[test]
-    fn test_two_torsion() {
-        for i in (0..8).filter(|i| i % 4 == 0) {
-            let point = EIGHT_TORSION[i].mul_by_pow_2(1);
-            assert!(point.is_valid());
-            assert!(point.is_identity());
-        }
-    }
-
-    // SQRT_M1 is the nonnegative square root of -1
-    #[test]
-    fn test_sqrt_minus_one() {
-        let minus_one = FieldElement::MINUS_ONE;
-        let sqrt_m1_sq = &SQRT_M1 * &SQRT_M1;
-        assert_eq!(minus_one, sqrt_m1_sq);
-        assert!(bool::from(!SQRT_M1.is_negative()));
-    }
-
-    #[test]
-    fn test_sqrt_constants_sign() {
-        let minus_one = FieldElement::MINUS_ONE;
-        let (was_nonzero_square, invsqrt_m1) = minus_one.invsqrt();
-        assert!(bool::from(was_nonzero_square));
-        let sign_test_sqrt = &invsqrt_m1 * &SQRT_M1;
-        assert_eq!(sign_test_sqrt, minus_one);
-    }
-
-    // EDWARDS_D equals -121665/121666 and EDWARDS_D2 doubles it
-    #[test]
-    fn test_d_vs_ratio() {
-        let a = -&FieldElement51([121665, 0, 0, 0, 0]);
-        let b = FieldElement51([121666, 0, 0, 0, 0]);
-        let d = &a * &b.invert();
-        let d2 = &d + &d;
-        assert_eq!(d, EDWARDS_D);
-        assert_eq!(d2, EDWARDS_D2);
-    }
-
-    fn assert_affine_niels_eq(a: &AffineNielsPoint, b: &AffineNielsPoint, i: usize) {
-        assert_eq!(a.y_plus_x.to_bytes(), b.y_plus_x.to_bytes(), "y_plus_x {i}");
-        assert_eq!(
-            a.y_minus_x.to_bytes(),
-            b.y_minus_x.to_bytes(),
-            "y_minus_x {i}"
-        );
-        assert_eq!(a.xy2d.to_bytes(), b.xy2d.to_bytes(), "xy2d {i}");
-    }
-
-    // the static B' odd-multiples table matches one built at runtime
-    #[test]
-    fn odd_multiples_of_basepoint_128_matches_runtime_table() {
-        let runtime = NafLookupTable8::<AffineNielsPoint>::from(&ED25519_BASEPOINT_128_POINT);
-        for i in 0..64 {
-            assert_affine_niels_eq(
-                &AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128.0[i],
-                &runtime.0[i],
-                i,
-            );
-        }
-    }
-
-    // regenerates the source text of `AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128`
-    #[test]
-    #[ignore]
-    fn print_odd_multiples_of_basepoint_128() {
-        fn print_fe(name: &str, fe: &FieldElement51) {
-            let canonical = FieldElement51::from_bytes(&fe.to_bytes());
-            println!("            {name}: FieldElement51::from_limbs([");
-            for limb in canonical.0.iter() {
-                println!("                {limb},");
-            }
-            println!("            ]),");
-        }
-
-        let table = NafLookupTable8::<AffineNielsPoint>::from(&ED25519_BASEPOINT_128_POINT);
-        println!(
-            "pub const AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128: NafLookupTable8<AffineNielsPoint> ="
-        );
-        println!("    NafLookupTable8([");
-        for point in table.0.iter() {
-            println!("        AffineNielsPoint {{");
-            print_fe("y_plus_x", &point.y_plus_x);
-            print_fe("y_minus_x", &point.y_minus_x);
-            print_fe("xy2d", &point.xy2d);
-            println!("        }},");
-        }
-        println!("    ]);");
-    }
-
-    // The helpers below rebuild the AVX2 B' table from serial arithmetic alone
-
+    /// Low 26 bits of a limb, the even half of an AVX2 limb pair
     const MASK_26: u64 = (1 << 26) - 1;
 
-    /// The four lane elements of the AVX2 cached encoding of `P`, scaled by `lambda`
-    #[allow(non_snake_case)]
-    fn cached_point_lanes(P: &EdwardsPoint, lambda: u64) -> [FieldElement51; 4] {
-        let lambda = FieldElement51::from_limbs([lambda, 0, 0, 0, 0]);
-        let c121666 = FieldElement51::from_limbs([121666, 0, 0, 0, 0]);
-        let c243332 = FieldElement51::from_limbs([243332, 0, 0, 0, 0]);
-        let c243330 = FieldElement51::from_limbs([243330, 0, 0, 0, 0]);
+    /// Count of odd multiples in a width-8 NAF table
+    const WIDTH_8_ENTRIES: usize = 64;
 
-        let canonical =
-            |fe: &FieldElement51| -> FieldElement51 { FieldElement51::from_bytes(&fe.to_bytes()) };
+    /// Canonical limbs through a byte round trip
+    fn canonical(element: &FieldElement51) -> FieldElement51 {
+        FieldElement51::from_bytes(&element.to_bytes())
+    }
 
-        let y_minus_x = &P.Y - &P.X;
-        let y_plus_x = &P.Y + &P.X;
+    /// A small integer as a field element
+    fn small(value: u64) -> FieldElement51 {
+        FieldElement51::from_limbs([value, 0, 0, 0, 0])
+    }
+
+    /// Assert that two affine Niels points encode the same bytes
+    fn assert_affine_niels_eq(left: &AffineNielsPoint, right: &AffineNielsPoint, index: usize) {
+        assert_eq!(
+            left.y_plus_x.to_bytes(),
+            right.y_plus_x.to_bytes(),
+            "y_plus_x {index}"
+        );
+        assert_eq!(
+            left.y_minus_x.to_bytes(),
+            right.y_minus_x.to_bytes(),
+            "y_minus_x {index}"
+        );
+        assert_eq!(left.xy2d.to_bytes(), right.xy2d.to_bytes(), "xy2d {index}");
+    }
+
+    /// The four lane elements of the AVX2 cached encoding of `point`, scaled by `lambda`
+    fn cached_point_lanes(point: &EdwardsPoint, lambda: u64) -> [FieldElement51; 4] {
+        let lambda = small(lambda);
+        let y_minus_x = &point.Y - &point.X;
+        let y_plus_x = &point.Y + &point.X;
         [
-            canonical(&(&(&c121666 * &y_minus_x) * &lambda)),
-            canonical(&(&(&c121666 * &y_plus_x) * &lambda)),
-            canonical(&(&(&c243332 * &P.Z) * &lambda)),
-            canonical(&(&(-&(&c243330 * &P.T)) * &lambda)),
+            canonical(&(&(&small(121666) * &y_minus_x) * &lambda)),
+            canonical(&(&(&small(121666) * &y_plus_x) * &lambda)),
+            canonical(&(&(&small(243332) * &point.Z) * &lambda)),
+            canonical(&(&(-&(&small(243330) * &point.T)) * &lambda)),
         ]
     }
 
     /// Interleave four lane elements into the five `u32x8` vectors of a `FieldElement2625x4`
     fn interleave_lanes(lanes: &[FieldElement51; 4]) -> [[u32; 8]; 5] {
         let mut out = [[0u32; 8]; 5];
-        let [a, b, c, d] = lanes;
-        for (i, vec) in out.iter_mut().enumerate() {
-            *vec = [
-                (a.0[i] & MASK_26) as u32,
-                (b.0[i] & MASK_26) as u32,
-                (a.0[i] >> 26) as u32,
-                (b.0[i] >> 26) as u32,
-                (c.0[i] & MASK_26) as u32,
-                (d.0[i] & MASK_26) as u32,
-                (c.0[i] >> 26) as u32,
-                (d.0[i] >> 26) as u32,
+        let [first, second, third, fourth] = lanes;
+        for (limb, vector) in out.iter_mut().enumerate() {
+            *vector = [
+                (first.0[limb] & MASK_26) as u32,
+                (second.0[limb] & MASK_26) as u32,
+                (first.0[limb] >> 26) as u32,
+                (second.0[limb] >> 26) as u32,
+                (third.0[limb] & MASK_26) as u32,
+                (fourth.0[limb] & MASK_26) as u32,
+                (third.0[limb] >> 26) as u32,
+                (fourth.0[limb] >> 26) as u32,
             ];
         }
         out
@@ -9367,17 +9279,21 @@ mod test {
 
     /// Check that every limb stays inside the lazy-negation bound of the AVX2 backend
     fn within_lazy_negation_bounds(lanes: &[FieldElement51; 4]) -> bool {
-        lanes.iter().all(|fe| {
-            fe.0.iter().all(|limb| {
+        for element in lanes {
+            for limb in element.0 {
                 let even = limb & MASK_26;
                 let odd = limb >> 26;
-                even * 100 <= 99 << 26 && odd * 100 <= 99 << 25
-            })
-        })
+                let is_within = even * 100 <= 99 << 26 && odd * 100 <= 99 << 25;
+                if !is_within {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
-    /// The smallest scaling of each odd multiple of `B'` whose limbs fit the bound
-    fn avx2_basepoint_128_table_entries() -> [[FieldElement51; 4]; 64] {
+    /// The smallest scaling of each odd multiple of `B'` with every limb inside the bound
+    fn avx2_table_entries() -> [[FieldElement51; 4]; WIDTH_8_ENTRIES] {
         let step = ED25519_BASEPOINT_128_POINT.double();
         let mut point = ED25519_BASEPOINT_128_POINT;
         core::array::from_fn(|_| {
@@ -9386,105 +9302,203 @@ mod test {
                     let lanes = cached_point_lanes(&point, lambda);
                     within_lazy_negation_bounds(&lanes).then_some(lanes)
                 })
-                .expect("no small lambda yields bounds-safe limbs");
+                .expect("some small lambda yields bounds-safe limbs");
             point += step;
             entry
         })
     }
 
-    // each generated entry encodes its odd multiple and survives the interleave
-    #[test]
-    fn avx2_basepoint_128_table_generation_is_consistent() {
-        for (i, lanes) in avx2_basepoint_128_table_entries().iter().enumerate() {
-            let vecs = interleave_lanes(lanes);
-            let mut recovered = [FieldElement51::ZERO; 4];
-            for (lane, recovered) in recovered.iter_mut().enumerate() {
-                let mut limbs = [0u64; 5];
-                let (lo, hi) = match lane {
-                    0 => (0, 2),
-                    1 => (1, 3),
-                    2 => (4, 6),
-                    3.. => (5, 7),
-                };
-                for i in 0..5 {
-                    limbs[i] = vecs[i][lo] as u64 + ((vecs[i][hi] as u64) << 26);
-                }
-                *recovered = FieldElement51::from_limbs(limbs);
+    /// Rebuild the four lane elements from interleaved AVX2 vectors
+    fn deinterleave_lanes(vectors: &[[u32; 8]; 5]) -> [FieldElement51; 4] {
+        core::array::from_fn(|lane| {
+            let (low, high) = match lane {
+                0 => (0, 2),
+                1 => (1, 3),
+                2 => (4, 6),
+                3.. => (5, 7),
+            };
+            let mut limbs = [0u64; 5];
+            for (limb, vector) in limbs.iter_mut().zip(vectors) {
+                *limb = vector[low] as u64 + ((vector[high] as u64) << 26);
             }
+            FieldElement51::from_limbs(limbs)
+        })
+    }
 
-            let expected = ED25519_BASEPOINT_128_POINT * Scalar::from(2 * i as u64 + 1);
+    /// Print one field element as a `from_limbs` source line
+    fn print_element(label: &str, element: &FieldElement51) {
+        println!("            {label}: FieldElement51::from_limbs([");
+        for limb in canonical(element).0.iter() {
+            println!("                {limb},");
+        }
+        println!("            ]),");
+    }
+
+    // every eight-torsion point times eight is the identity
+    #[test]
+    fn eight_torsion() {
+        for torsion_point in &EIGHT_TORSION {
+            let point = torsion_point.mul_by_pow_2(3);
+            assert!(point.is_valid());
+            assert!(point.is_identity());
+        }
+    }
+
+    // every even-index torsion point times four is the identity
+    #[test]
+    fn four_torsion() {
+        for index in (0..8).filter(|index| index % 2 == 0) {
+            let point = EIGHT_TORSION[index].mul_by_pow_2(2);
+            assert!(point.is_valid());
+            assert!(point.is_identity());
+        }
+    }
+
+    // torsion points at index 0 and 4 times two are the identity
+    #[test]
+    fn two_torsion() {
+        for index in (0..8).filter(|index| index % 4 == 0) {
+            let point = EIGHT_TORSION[index].mul_by_pow_2(1);
+            assert!(point.is_valid());
+            assert!(point.is_identity());
+        }
+    }
+
+    // SQRT_M1 is the nonnegative square root of -1
+    #[test]
+    fn square_root() {
+        let minus_one = FieldElement::MINUS_ONE;
+
+        let squared = &SQRT_M1 * &SQRT_M1;
+
+        assert_eq!(minus_one, squared);
+        assert!(bool::from(!SQRT_M1.is_negative()));
+    }
+
+    // the inverse square root of -1 times SQRT_M1 gives -1
+    #[test]
+    fn root_sign() {
+        let minus_one = FieldElement::MINUS_ONE;
+
+        let (is_nonzero_square, inverse_root) = minus_one.invsqrt();
+        let product = &inverse_root * &SQRT_M1;
+
+        assert!(bool::from(is_nonzero_square));
+        assert_eq!(product, minus_one);
+    }
+
+    // EDWARDS_D equals -121665/121666 and EDWARDS_D2 doubles it
+    #[test]
+    fn curve_constant() {
+        let numerator = -&small(121665);
+        let denominator = small(121666);
+
+        let constant = &numerator * &denominator.invert();
+        let doubled = &constant + &constant;
+
+        assert_eq!(constant, EDWARDS_D);
+        assert_eq!(doubled, EDWARDS_D2);
+    }
+
+    // the static B' odd-multiples table matches one built at runtime
+    #[test]
+    fn shifted_table() {
+        let runtime = NafLookupTable8::<AffineNielsPoint>::from(&ED25519_BASEPOINT_128_POINT);
+
+        for index in 0..WIDTH_8_ENTRIES {
+            assert_affine_niels_eq(
+                &AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128.0[index],
+                &runtime.0[index],
+                index,
+            );
+        }
+    }
+
+    // each generated AVX2 entry encodes its odd multiple and survives the interleave
+    #[test]
+    fn avx2_table() {
+        let two = small(2);
+        for (index, lanes) in avx2_table_entries().iter().enumerate() {
+            let [y_minus_x, y_plus_x, z, minus_t] = deinterleave_lanes(&interleave_lanes(lanes));
+
+            let expected = ED25519_BASEPOINT_128_POINT * Scalar::from(2 * index as u64 + 1);
 
             // Cross-multiplying compares the scaled cached encoding with the expected point
-            let [a, b, c, d] = recovered;
-            let two = FieldElement51::from_limbs([2, 0, 0, 0, 0]);
-            let c121665 = FieldElement51::from_limbs([121665, 0, 0, 0, 0]);
-            let c121666 = FieldElement51::from_limbs([121666, 0, 0, 0, 0]);
-
-            let eq = |lhs: &FieldElement51, rhs: &FieldElement51, what: &str| {
-                assert_eq!(lhs.to_bytes(), rhs.to_bytes(), "{what} mismatch at {i}");
+            let assert_same = |left: &FieldElement51, right: &FieldElement51, label: &str| {
+                assert_eq!(
+                    left.to_bytes(),
+                    right.to_bytes(),
+                    "{label} mismatch at {index}"
+                );
             };
-            eq(
-                &(&(&two * &a) * &expected.Z),
-                &(&(&expected.Y - &expected.X) * &c),
+            assert_same(
+                &(&(&two * &y_minus_x) * &expected.Z),
+                &(&(&expected.Y - &expected.X) * &z),
                 "Y-X",
             );
-            eq(
-                &(&(&two * &b) * &expected.Z),
-                &(&(&expected.Y + &expected.X) * &c),
+            assert_same(
+                &(&(&two * &y_plus_x) * &expected.Z),
+                &(&(&expected.Y + &expected.X) * &z),
                 "Y+X",
             );
-            eq(
-                &(&(&c121666 * &(-&d)) * &expected.Z),
-                &(&(&c121665 * &expected.T) * &c),
+            assert_same(
+                &(&(&small(121666) * &(-&minus_t)) * &expected.Z),
+                &(&(&small(121665) * &expected.T) * &z),
                 "T",
             );
         }
     }
 
-    // regenerates the IFMA `BASEPOINT_128_ODD_LOOKUP_TABLE` statics at widths 8 and 5
+    // regenerates the source text of `AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128`
     #[test]
     #[ignore]
-    fn print_ifma_basepoint_128_tables() {
-        fn print_entries(count: usize) {
-            let entries = avx2_basepoint_128_table_entries();
-            for lanes in entries.iter().take(count) {
-                let [a, b, c, d] = lanes;
-                println!("    CachedPoint(F51x4Reduced([");
-                for i in 0..5 {
-                    println!(
-                        "        u64x4::new_const({}, {}, {}, {}),",
-                        a.0[i], b.0[i], c.0[i], d.0[i]
-                    );
-                }
-                println!("    ])),");
-            }
+    fn print_affine() {
+        let table = NafLookupTable8::<AffineNielsPoint>::from(&ED25519_BASEPOINT_128_POINT);
+        println!(
+            "pub const AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128: NafLookupTable8<AffineNielsPoint> ="
+        );
+        println!("    NafLookupTable8([");
+        for point in table.0.iter() {
+            println!("        AffineNielsPoint {{");
+            print_element("y_plus_x", &point.y_plus_x);
+            print_element("y_minus_x", &point.y_minus_x);
+            print_element("xy2d", &point.xy2d);
+            println!("        }},");
         }
+        println!("    ]);");
+    }
 
-        println!("#[cfg(feature = \"precomputed-tables\")]");
+    // regenerates the IFMA `BASEPOINT_128_ODD_LOOKUP_TABLE` source text
+    #[test]
+    #[ignore]
+    fn print_ifma() {
         println!(
             "pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLookupTable8(["
         );
-        print_entries(64);
-        println!("]);");
-        println!();
-        println!("#[cfg(not(feature = \"precomputed-tables\"))]");
-        println!(
-            "pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable5<CachedPoint> = NafLookupTable5(["
-        );
-        print_entries(8);
+        for lanes in avx2_table_entries().iter() {
+            let [first, second, third, fourth] = lanes;
+            println!("    CachedPoint(F51x4Reduced([");
+            for limb in 0..5 {
+                println!(
+                    "        u64x4::new_const({}, {}, {}, {}),",
+                    first.0[limb], second.0[limb], third.0[limb], fourth.0[limb]
+                );
+            }
+            println!("    ])),");
+        }
         println!("]);");
     }
 
     // regenerates the AVX2 `BASEPOINT_128_ODD_LOOKUP_TABLE` source text
     #[test]
     #[ignore]
-    fn print_avx2_basepoint_128_table() {
+    fn print_avx2() {
         println!("pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> =");
         println!("    NafLookupTable8([");
-        for lanes in avx2_basepoint_128_table_entries().iter() {
+        for lanes in avx2_table_entries().iter() {
             println!("        CachedPoint(FieldElement2625x4([");
-            for vec in interleave_lanes(lanes).iter() {
-                let [v0, v1, v2, v3, v4, v5, v6, v7] = vec;
+            for vector in interleave_lanes(lanes).iter() {
+                let [v0, v1, v2, v3, v4, v5, v6, v7] = vector;
                 println!(
                     "            u32x8::new_const({v0}, {v1}, {v2}, {v3}, {v4}, {v5}, {v6}, {v7}),"
                 );

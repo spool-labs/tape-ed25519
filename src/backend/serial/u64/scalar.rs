@@ -335,11 +335,11 @@ impl Scalar52 {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     /// The value 2^253 - 1, just above l - 1, which exercises the limb bounds
-    pub static X: Scalar52 = Scalar52([
+    pub static MAXIMUM: Scalar52 = Scalar52([
         0x000fffffffffffff,
         0x000fffffffffffff,
         0x000fffffffffffff,
@@ -347,8 +347,8 @@ mod test {
         0x00001fffffffffff,
     ]);
 
-    /// The square of X modulo l
-    pub static XX: Scalar52 = Scalar52([
+    /// The square of MAXIMUM modulo l
+    pub static MAXIMUM_SQUARED: Scalar52 = Scalar52([
         0x0001668020217559,
         0x000531640ffd0ec0,
         0x00085fd6f9f38a31,
@@ -356,8 +356,8 @@ mod test {
         0x000006ce65046df0,
     ]);
 
-    /// The square of X modulo l in Montgomery form
-    pub static XX_MONT: Scalar52 = Scalar52([
+    /// The square of MAXIMUM modulo l in Montgomery form
+    pub static MAXIMUM_SQUARED_MONTGOMERY: Scalar52 = Scalar52([
         0x000c754eea569a5c,
         0x00063b6ed36cb215,
         0x0008ffa36bf25886,
@@ -366,7 +366,7 @@ mod test {
     ]);
 
     /// A second operand for the products
-    pub static Y: Scalar52 = Scalar52([
+    pub static OPERAND: Scalar52 = Scalar52([
         0x000b75071e1458fa,
         0x000bf9d75e1ecdac,
         0x000433d2baf0672b,
@@ -374,8 +374,8 @@ mod test {
         0x00000d96018bb825,
     ]);
 
-    /// The product of X and Y modulo l
-    pub static XY: Scalar52 = Scalar52([
+    /// The product of MAXIMUM and OPERAND modulo l
+    pub static PRODUCT: Scalar52 = Scalar52([
         0x000ee6d76ba7632d,
         0x000ed50d71d84e02,
         0x00000000001ba634,
@@ -383,8 +383,8 @@ mod test {
         0x0000000000000000,
     ]);
 
-    /// The product of X and Y modulo l in Montgomery form
-    pub static XY_MONT: Scalar52 = Scalar52([
+    /// The product of MAXIMUM and OPERAND modulo l in Montgomery form
+    pub static PRODUCT_MONTGOMERY: Scalar52 = Scalar52([
         0x0006d52bf200cfd5,
         0x00033fb1d7021570,
         0x000f201bc07139d8,
@@ -392,8 +392,8 @@ mod test {
         0x000007b839c00268,
     ]);
 
-    /// An operand whose sum with B is zero modulo l
-    pub static A: Scalar52 = Scalar52([
+    /// An operand whose sum with NEGATED_ADDEND is zero modulo l
+    pub static ADDEND: Scalar52 = Scalar52([
         0x0005236c07b3be89,
         0x0001bc3d2a67c0c4,
         0x000a4aa782aae3ee,
@@ -401,8 +401,8 @@ mod test {
         0x00000532da9fab8c,
     ]);
 
-    /// The negation of A modulo l
-    pub static B: Scalar52 = Scalar52([
+    /// The negation of ADDEND modulo l
+    pub static NEGATED_ADDEND: Scalar52 = Scalar52([
         0x000d3fae55421564,
         0x000c2df24f65a4bc,
         0x0005b5587d69fb0b,
@@ -410,8 +410,8 @@ mod test {
         0x00000acd25605473,
     ]);
 
-    /// The difference A - B modulo l
-    pub static AB: Scalar52 = Scalar52([
+    /// The difference ADDEND - NEGATED_ADDEND modulo l
+    pub static DIFFERENCE: Scalar52 = Scalar52([
         0x000a46d80f677d12,
         0x0003787a54cf8188,
         0x0004954f0555c7dc,
@@ -420,7 +420,7 @@ mod test {
     ]);
 
     /// The value 2^512 - 1 reduced modulo l
-    pub static C: Scalar52 = Scalar52([
+    pub static WIDE_REDUCED: Scalar52 = Scalar52([
         0x000611e3449c0f00,
         0x000a768859347a40,
         0x0007f5be65d00e1b,
@@ -428,77 +428,86 @@ mod test {
         0x00000399411b7c30,
     ]);
 
+    // multiplying the largest limb pattern by itself gives its square modulo l
     #[test]
-    fn mul_max() {
-        let res = Scalar52::mul(&X, &X);
-        for i in 0..5 {
-            assert!(res[i] == XX[i]);
+    fn maximum_product() {
+        let result = Scalar52::mul(&MAXIMUM, &MAXIMUM);
+        for limb in 0..5 {
+            assert!(result[limb] == MAXIMUM_SQUARED[limb]);
         }
     }
 
+    // squaring the largest limb pattern matches the precomputed square
     #[test]
-    fn square_max() {
-        let res = X.square();
-        for i in 0..5 {
-            assert!(res[i] == XX[i]);
+    fn maximum_square() {
+        let result = MAXIMUM.square();
+        for limb in 0..5 {
+            assert!(result[limb] == MAXIMUM_SQUARED[limb]);
         }
     }
 
+    // the Montgomery product of the largest limb pattern with itself matches the precomputed value
     #[test]
-    fn montgomery_mul_max() {
-        let res = Scalar52::montgomery_mul(&X, &X);
-        for i in 0..5 {
-            assert!(res[i] == XX_MONT[i]);
+    fn montgomery_maximum() {
+        let result = Scalar52::montgomery_mul(&MAXIMUM, &MAXIMUM);
+        for limb in 0..5 {
+            assert!(result[limb] == MAXIMUM_SQUARED_MONTGOMERY[limb]);
         }
     }
 
+    // the Montgomery square of the largest limb pattern matches the precomputed value
     #[test]
-    fn montgomery_square_max() {
-        let res = X.montgomery_square();
-        for i in 0..5 {
-            assert!(res[i] == XX_MONT[i]);
+    fn montgomery_square() {
+        let result = MAXIMUM.montgomery_square();
+        for limb in 0..5 {
+            assert!(result[limb] == MAXIMUM_SQUARED_MONTGOMERY[limb]);
         }
     }
 
+    // the product of two operands matches the precomputed value modulo l
     #[test]
-    fn mul() {
-        let res = Scalar52::mul(&X, &Y);
-        for i in 0..5 {
-            assert!(res[i] == XY[i]);
+    fn product() {
+        let result = Scalar52::mul(&MAXIMUM, &OPERAND);
+        for limb in 0..5 {
+            assert!(result[limb] == PRODUCT[limb]);
         }
     }
 
+    // the Montgomery product of two operands matches the precomputed value
     #[test]
-    fn montgomery_mul() {
-        let res = Scalar52::montgomery_mul(&X, &Y);
-        for i in 0..5 {
-            assert!(res[i] == XY_MONT[i]);
+    fn montgomery_product() {
+        let result = Scalar52::montgomery_mul(&MAXIMUM, &OPERAND);
+        for limb in 0..5 {
+            assert!(result[limb] == PRODUCT_MONTGOMERY[limb]);
         }
     }
 
+    // an operand plus its negation is zero modulo l
     #[test]
-    fn add() {
-        let res = Scalar52::add(&A, &B);
+    fn sum() {
+        let result = Scalar52::add(&ADDEND, &NEGATED_ADDEND);
         let zero = Scalar52::ZERO;
-        for i in 0..5 {
-            assert!(res[i] == zero[i]);
+        for limb in 0..5 {
+            assert!(result[limb] == zero[limb]);
         }
     }
 
+    // subtraction matches the precomputed difference modulo l
     #[test]
-    fn sub() {
-        let res = Scalar52::sub(&A, &B);
-        for i in 0..5 {
-            assert!(res[i] == AB[i]);
+    fn difference() {
+        let result = Scalar52::sub(&ADDEND, &NEGATED_ADDEND);
+        for limb in 0..5 {
+            assert!(result[limb] == DIFFERENCE[limb]);
         }
     }
 
+    // reducing 2^512 - 1 matches the precomputed value
     #[test]
-    fn from_bytes_wide() {
-        let bignum = [255u8; 64];
-        let reduced = Scalar52::from_bytes_wide(&bignum);
-        for i in 0..5 {
-            assert!(reduced[i] == C[i]);
+    fn wide_reduction() {
+        let all_ones = [255u8; 64];
+        let reduced = Scalar52::from_bytes_wide(&all_ones);
+        for limb in 0..5 {
+            assert!(reduced[limb] == WIDE_REDUCED[limb]);
         }
     }
 }

@@ -14,12 +14,17 @@ use crate::scalar::Scalar;
 use crate::traits::Identity;
 use crate::window::NafLookupTable5;
 
+/// NAF window for the two variable points, sized to their eight-entry tables
 const DYNAMIC_NAF_WINDOW: usize = 5;
 
-// Both basepoint tables hold width-8 odd multiples
+/// NAF window for the low half of the basepoint scalar, sized to its static table
 const B_LO_NAF_WINDOW: usize = 8;
 
+/// NAF window for the high half of the basepoint scalar, sized to its static table
 const B_HI_NAF_WINDOW: usize = 8;
+
+/// Bytes in each half of the split basepoint scalar
+const HALF_SCALAR_LENGTH: usize = 16;
 
 /// Compute `a1 A1 + a2 A2 + b B` in variable time for `a1` and `a2` below 2^128
 pub fn mul_128_128_256_prechecked(
@@ -35,8 +40,8 @@ pub fn mul_128_128_256_prechecked(
     let mut b_lo_bytes = [0u8; 32];
     let mut b_hi_bytes = [0u8; 32];
 
-    b_lo_bytes[..16].copy_from_slice(&b_bytes[..16]);
-    b_hi_bytes[..16].copy_from_slice(&b_bytes[16..]);
+    b_lo_bytes[..HALF_SCALAR_LENGTH].copy_from_slice(&b_bytes[..HALF_SCALAR_LENGTH]);
+    b_hi_bytes[..HALF_SCALAR_LENGTH].copy_from_slice(&b_bytes[HALF_SCALAR_LENGTH..]);
 
     let b_lo = Scalar::from_canonical_bytes_unchecked(b_lo_bytes);
     let b_hi = Scalar::from_canonical_bytes_unchecked(b_hi_bytes);
@@ -104,12 +109,13 @@ pub fn mul_128_128_256_prechecked(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use rand::Rng;
 
     use super::*;
     use crate::scalar::Scalar;
 
+    /// A uniformly random scalar
     fn random_scalar() -> Scalar {
         let mut wide = [0u8; 64];
         let mut rng = rand::rng();
@@ -117,145 +123,213 @@ mod test {
         Scalar::from_bytes_mod_order_wide(&wide)
     }
 
+    /// A multiple of the basepoint
+    fn basepoint_times(multiple: u64) -> EdwardsPoint {
+        constants::ED25519_BASEPOINT_POINT * Scalar::from(multiple)
+    }
+
+    /// A scalar with the low sixteen bytes from `low` and the rest zero
+    fn half_width_scalar(low: [u8; HALF_SCALAR_LENGTH]) -> Scalar {
+        let mut bytes = [0u8; 32];
+        bytes[..HALF_SCALAR_LENGTH].copy_from_slice(&low);
+        Scalar::from_bytes_mod_order(bytes)
+    }
+
+    /// The naive sum of the three products
+    fn naive(
+        first_scalar: Scalar,
+        first_point: EdwardsPoint,
+        second_scalar: Scalar,
+        second_point: EdwardsPoint,
+        base_scalar: Scalar,
+    ) -> EdwardsPoint {
+        (first_scalar * first_point + second_scalar * second_point)
+            + base_scalar * constants::ED25519_BASEPOINT_POINT
+    }
+
+    // small scalars on small multiples of the basepoint match the naive sum
     #[test]
-    fn test_triple_base_multiplication() {
-        let a1 = Scalar::from(12345u64);
-        let a2 = Scalar::from(67890u64);
-        let b = random_scalar();
+    fn small_scalars() {
+        let first_scalar = Scalar::from(12345u64);
+        let second_scalar = Scalar::from(67890u64);
+        let base_scalar = random_scalar();
+        let first_point = basepoint_times(2);
+        let second_point = basepoint_times(3);
 
-        let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(2u64);
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(3u64);
+        let result = mul_128_128_256_prechecked(
+            &first_scalar,
+            &first_point,
+            &second_scalar,
+            &second_point,
+            &base_scalar,
+        );
 
-        let result = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-
-        let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
-
+        let expected = naive(
+            first_scalar,
+            first_point,
+            second_scalar,
+            second_point,
+            base_scalar,
+        );
         assert_eq!(result, expected);
     }
 
+    // scalars that fill all 128 bits match the naive sum
     #[test]
-    fn test_triple_base_multiplication_128() {
-        let a1_bytes = [
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-        ];
-        let a1 = Scalar::from_bytes_mod_order(a1_bytes);
-
-        let a2_bytes = [
+    fn half_width() {
+        let first_scalar = half_width_scalar([0xFF; 16]);
+        let second_scalar = half_width_scalar([
             0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
-            0x77, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-        ];
-        let a2 = Scalar::from_bytes_mod_order(a2_bytes);
+            0x77, 0x88,
+        ]);
+        let base_scalar = random_scalar();
+        let first_point = basepoint_times(5);
+        let second_point = basepoint_times(7);
 
-        let b = random_scalar();
+        let result = mul_128_128_256_prechecked(
+            &first_scalar,
+            &first_point,
+            &second_scalar,
+            &second_point,
+            &base_scalar,
+        );
 
-        let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(5u64);
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(7u64);
-
-        let result_128 = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-
-        let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
-
-        assert_eq!(result_128, expected, "Optimized 128-bit version failed");
-    }
-
-    #[test]
-    fn test_triple_base_with_zero_scalars() {
-        let a1 = Scalar::ZERO;
-        let a2 = Scalar::from(123u64);
-        let b = random_scalar();
-
-        let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(2u64);
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(3u64);
-
-        let result = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-        let expected = a2 * A2 + b * constants::ED25519_BASEPOINT_POINT;
-
+        let expected = naive(
+            first_scalar,
+            first_point,
+            second_scalar,
+            second_point,
+            base_scalar,
+        );
         assert_eq!(result, expected);
     }
 
+    // a zero scalar drops its term from the sum
     #[test]
-    fn test_triple_base_with_identity_points() {
-        let a1 = Scalar::from(111u64);
-        let a2 = Scalar::from(222u64);
-        let b = random_scalar();
+    fn zero_scalar() {
+        let first_scalar = Scalar::ZERO;
+        let second_scalar = Scalar::from(123u64);
+        let base_scalar = random_scalar();
+        let first_point = basepoint_times(2);
+        let second_point = basepoint_times(3);
 
-        let A1 = EdwardsPoint::identity();
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(3u64);
+        let result = mul_128_128_256_prechecked(
+            &first_scalar,
+            &first_point,
+            &second_scalar,
+            &second_point,
+            &base_scalar,
+        );
 
-        let result = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-        let expected = a2 * A2 + b * constants::ED25519_BASEPOINT_POINT;
-
+        let expected =
+            second_scalar * second_point + base_scalar * constants::ED25519_BASEPOINT_POINT;
         assert_eq!(result, expected);
     }
 
+    // an identity point drops its term from the sum
     #[test]
-    fn test_triple_base_consistency() {
-        let a1 = Scalar::from(0x123456789ABCDEFu64);
-        let a2 = Scalar::from(0xFEDCBA987654321u64);
-        let b = random_scalar();
+    fn identity_point() {
+        let first_scalar = Scalar::from(111u64);
+        let second_scalar = Scalar::from(222u64);
+        let base_scalar = random_scalar();
+        let first_point = EdwardsPoint::identity();
+        let second_point = basepoint_times(3);
 
-        let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(11u64);
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(13u64);
+        let result = mul_128_128_256_prechecked(
+            &first_scalar,
+            &first_point,
+            &second_scalar,
+            &second_point,
+            &base_scalar,
+        );
 
-        let result_optimized = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-        let result_general = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
-
-        assert_eq!(result_optimized, result_general);
+        let expected =
+            second_scalar * second_point + base_scalar * constants::ED25519_BASEPOINT_POINT;
+        assert_eq!(result, expected);
     }
 
+    // sixty-bit scalars match the naive sum
     #[test]
-    fn test_triple_base_large_scalars() {
-        let mut a1_bytes = [0xFFu8; 32];
-        a1_bytes[16..].fill(0x00);
-        let a1 = Scalar::from_bytes_mod_order(a1_bytes);
+    fn medium_scalars() {
+        let first_scalar = Scalar::from(0x123456789ABCDEFu64);
+        let second_scalar = Scalar::from(0xFEDCBA987654321u64);
+        let base_scalar = random_scalar();
+        let first_point = basepoint_times(11);
+        let second_point = basepoint_times(13);
 
-        let mut a2_bytes = [0xAAu8; 32];
-        a2_bytes[16..].fill(0x00);
-        let a2 = Scalar::from_bytes_mod_order(a2_bytes);
+        let result = mul_128_128_256_prechecked(
+            &first_scalar,
+            &first_point,
+            &second_scalar,
+            &second_point,
+            &base_scalar,
+        );
 
-        let b = random_scalar();
+        let expected = naive(
+            first_scalar,
+            first_point,
+            second_scalar,
+            second_point,
+            base_scalar,
+        );
+        assert_eq!(result, expected);
+    }
 
-        let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(17u64);
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(19u64);
+    // repeated-byte 128-bit scalars match the naive sum
+    #[test]
+    fn large_scalars() {
+        let first_scalar = half_width_scalar([0xFF; 16]);
+        let second_scalar = half_width_scalar([0xAA; 16]);
+        let base_scalar = random_scalar();
+        let first_point = basepoint_times(17);
+        let second_point = basepoint_times(19);
 
-        let result = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-        let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
+        let result = mul_128_128_256_prechecked(
+            &first_scalar,
+            &first_point,
+            &second_scalar,
+            &second_point,
+            &base_scalar,
+        );
 
+        let expected = naive(
+            first_scalar,
+            first_point,
+            second_scalar,
+            second_point,
+            base_scalar,
+        );
         assert_eq!(result, expected);
     }
 
     proptest::proptest! {
+        // random 128-bit scalars on random points match the naive sum
         #[test]
-        fn proptest_triple_scalar_mul_equivalence(
-            a1_bytes_16 in proptest::array::uniform16(proptest::num::u8::ANY),
-            a2_bytes_16 in proptest::array::uniform16(proptest::num::u8::ANY),
-            b_bytes in proptest::array::uniform32(proptest::num::u8::ANY),
-            A1_scalar_bytes in proptest::array::uniform32(proptest::num::u8::ANY),
-            A2_scalar_bytes in proptest::array::uniform32(proptest::num::u8::ANY),
+        fn random_inputs(
+            first_low in proptest::array::uniform16(proptest::num::u8::ANY),
+            second_low in proptest::array::uniform16(proptest::num::u8::ANY),
+            base_bytes in proptest::array::uniform32(proptest::num::u8::ANY),
+            first_point_bytes in proptest::array::uniform32(proptest::num::u8::ANY),
+            second_point_bytes in proptest::array::uniform32(proptest::num::u8::ANY),
         ) {
-            let mut a1_bytes = [0u8; 32];
-            let mut a2_bytes = [0u8; 32];
-            a1_bytes[..16].copy_from_slice(&a1_bytes_16);
-            a2_bytes[..16].copy_from_slice(&a2_bytes_16);
+            let first_scalar = half_width_scalar(first_low);
+            let second_scalar = half_width_scalar(second_low);
+            let base_scalar = Scalar::from_bytes_mod_order(base_bytes);
+            let first_point =
+                constants::ED25519_BASEPOINT_POINT * Scalar::from_bytes_mod_order(first_point_bytes);
+            let second_point =
+                constants::ED25519_BASEPOINT_POINT * Scalar::from_bytes_mod_order(second_point_bytes);
 
-            let a1 = Scalar::from_bytes_mod_order(a1_bytes);
-            let a2 = Scalar::from_bytes_mod_order(a2_bytes);
+            let result = mul_128_128_256_prechecked(
+                &first_scalar,
+                &first_point,
+                &second_scalar,
+                &second_point,
+                &base_scalar,
+            );
 
-            let b = Scalar::from_bytes_mod_order(b_bytes);
-
-            let A1_scalar = Scalar::from_bytes_mod_order(A1_scalar_bytes);
-            let A2_scalar = Scalar::from_bytes_mod_order(A2_scalar_bytes);
-            let A1 = constants::ED25519_BASEPOINT_POINT * A1_scalar;
-            let A2 = constants::ED25519_BASEPOINT_POINT * A2_scalar;
-
-            let result_optimized = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-
-            let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
-
-            proptest::prop_assert_eq!(result_optimized, expected, "Optimized triple scalar mul should equal raw operations");
+            let expected = naive(first_scalar, first_point, second_scalar, second_point, base_scalar);
+            proptest::prop_assert_eq!(result, expected);
         }
     }
 }
