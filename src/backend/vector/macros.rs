@@ -134,18 +134,18 @@ macro_rules! impl_shared {
         #[unsafe_target_feature("avx2")]
         impl $ty {
             #[inline]
-            pub fn shl<const N: i32>(self) -> Self {
-                unsafe { core::arch::x86_64::$shl_intrinsic(self.0, N).into() }
+            pub fn shl<const SHIFT: i32>(self) -> Self {
+                unsafe { core::arch::x86_64::$shl_intrinsic(self.0, SHIFT).into() }
             }
 
             #[inline]
-            pub fn shr<const N: i32>(self) -> Self {
-                unsafe { core::arch::x86_64::$shr_intrinsic(self.0, N).into() }
+            pub fn shr<const SHIFT: i32>(self) -> Self {
+                unsafe { core::arch::x86_64::$shr_intrinsic(self.0, SHIFT).into() }
             }
 
             #[inline]
-            pub fn extract<const N: i32>(self) -> $lane_ty {
-                unsafe { core::arch::x86_64::$extract_intrinsic(self.0, N) as $lane_ty }
+            pub fn extract<const INDEX: i32>(self) -> $lane_ty {
+                unsafe { core::arch::x86_64::$extract_intrinsic(self.0, INDEX) as $lane_ty }
             }
         }
     };

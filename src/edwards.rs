@@ -445,9 +445,9 @@ impl EdwardsPoint {
 // Addition and Subtraction
 // ------------------------------------------------------------------------
 
-impl<'a> Add<&'a EdwardsPoint> for &EdwardsPoint {
+impl Add<&EdwardsPoint> for &EdwardsPoint {
     type Output = EdwardsPoint;
-    fn add(self, other: &'a EdwardsPoint) -> EdwardsPoint {
+    fn add(self, other: &EdwardsPoint) -> EdwardsPoint {
         (self + &other.as_projective_niels()).as_extended()
     }
 }
@@ -458,17 +458,17 @@ define_add_variants!(
     Output = EdwardsPoint
 );
 
-impl<'a> AddAssign<&'a EdwardsPoint> for EdwardsPoint {
-    fn add_assign(&mut self, _rhs: &'a EdwardsPoint) {
+impl AddAssign<&EdwardsPoint> for EdwardsPoint {
+    fn add_assign(&mut self, _rhs: &EdwardsPoint) {
         *self = (self as &EdwardsPoint) + _rhs;
     }
 }
 
 define_add_assign_variants!(LHS = EdwardsPoint, RHS = EdwardsPoint);
 
-impl<'a> Sub<&'a EdwardsPoint> for &EdwardsPoint {
+impl Sub<&EdwardsPoint> for &EdwardsPoint {
     type Output = EdwardsPoint;
-    fn sub(self, other: &'a EdwardsPoint) -> EdwardsPoint {
+    fn sub(self, other: &EdwardsPoint) -> EdwardsPoint {
         (self - &other.as_projective_niels()).as_extended()
     }
 }
@@ -479,21 +479,21 @@ define_sub_variants!(
     Output = EdwardsPoint
 );
 
-impl<'a> SubAssign<&'a EdwardsPoint> for EdwardsPoint {
-    fn sub_assign(&mut self, _rhs: &'a EdwardsPoint) {
+impl SubAssign<&EdwardsPoint> for EdwardsPoint {
+    fn sub_assign(&mut self, _rhs: &EdwardsPoint) {
         *self = (self as &EdwardsPoint) - _rhs;
     }
 }
 
 define_sub_assign_variants!(LHS = EdwardsPoint, RHS = EdwardsPoint);
 
-impl<T> Sum<T> for EdwardsPoint
+impl<Term> Sum<Term> for EdwardsPoint
 where
-    T: Borrow<EdwardsPoint>,
+    Term: Borrow<EdwardsPoint>,
 {
-    fn sum<I>(iter: I) -> Self
+    fn sum<Items>(iter: Items) -> Self
     where
-        I: Iterator<Item = T>,
+        Items: Iterator<Item = Term>,
     {
         iter.fold(EdwardsPoint::identity(), |acc, item| acc + item.borrow())
     }
@@ -528,8 +528,8 @@ impl Neg for EdwardsPoint {
 // Scalar multiplication
 // ------------------------------------------------------------------------
 
-impl<'a> MulAssign<&'a Scalar> for EdwardsPoint {
-    fn mul_assign(&mut self, scalar: &'a Scalar) {
+impl MulAssign<&Scalar> for EdwardsPoint {
+    fn mul_assign(&mut self, scalar: &Scalar) {
         let result = (self as &EdwardsPoint) * scalar;
         *self = result;
     }
@@ -540,25 +540,25 @@ define_mul_assign_variants!(LHS = EdwardsPoint, RHS = Scalar);
 define_mul_variants!(LHS = EdwardsPoint, RHS = Scalar, Output = EdwardsPoint);
 define_mul_variants!(LHS = Scalar, RHS = EdwardsPoint, Output = EdwardsPoint);
 
-impl<'a> Mul<&'a Scalar> for &EdwardsPoint {
+impl Mul<&Scalar> for &EdwardsPoint {
     type Output = EdwardsPoint;
     /// Scalar multiplication: compute `scalar * self`.
     ///
     /// For scalar multiplication of a basepoint,
     /// `EdwardsBasepointTable` is approximately 4x faster.
-    fn mul(self, scalar: &'a Scalar) -> EdwardsPoint {
+    fn mul(self, scalar: &Scalar) -> EdwardsPoint {
         dispatch::variable_base_mul(self, scalar)
     }
 }
 
-impl<'a> Mul<&'a EdwardsPoint> for &Scalar {
+impl Mul<&EdwardsPoint> for &Scalar {
     type Output = EdwardsPoint;
 
     /// Scalar multiplication: compute `scalar * self`.
     ///
     /// For scalar multiplication of a basepoint,
     /// `EdwardsBasepointTable` is approximately 4x faster.
-    fn mul(self, point: &'a EdwardsPoint) -> EdwardsPoint {
+    fn mul(self, point: &EdwardsPoint) -> EdwardsPoint {
         point * self
     }
 }

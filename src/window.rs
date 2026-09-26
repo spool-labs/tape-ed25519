@@ -60,15 +60,15 @@ impl_lookup_table! {
 }
 
 // For homogeneity we then alias it to "LookupTableRadix16".
-pub type LookupTableRadix16<T> = LookupTable<T>;
+pub type LookupTableRadix16<Point> = LookupTable<Point>;
 
 /// Holds odd multiples 1A, 3A, ..., 15A of a point A.
 #[derive(Copy, Clone)]
-pub struct NafLookupTable5<T>(pub [T; 8]);
+pub struct NafLookupTable5<Point>(pub [Point; 8]);
 
-impl<T: Copy> NafLookupTable5<T> {
+impl<Point: Copy> NafLookupTable5<Point> {
     /// Given public, odd \\( x \\) with \\( 0 < x < 2^4 \\), return \\(xA\\).
-    pub fn select(&self, x: usize) -> T {
+    pub fn select(&self, x: usize) -> Point {
         debug_assert_eq!(x & 1, 1);
         debug_assert!(x < 16);
 
@@ -76,14 +76,14 @@ impl<T: Copy> NafLookupTable5<T> {
     }
 }
 
-impl<T: Debug> Debug for NafLookupTable5<T> {
+impl<Point: Debug> Debug for NafLookupTable5<Point> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "NafLookupTable5({:?})", self.0)
     }
 }
 
-impl<'a> From<&'a EdwardsPoint> for NafLookupTable5<ProjectiveNielsPoint> {
-    fn from(A: &'a EdwardsPoint) -> Self {
+impl From<&EdwardsPoint> for NafLookupTable5<ProjectiveNielsPoint> {
+    fn from(A: &EdwardsPoint) -> Self {
         let mut Ai = [A.as_projective_niels(); 8];
         let A2 = A.double();
         for i in 0..7 {
@@ -94,8 +94,8 @@ impl<'a> From<&'a EdwardsPoint> for NafLookupTable5<ProjectiveNielsPoint> {
     }
 }
 
-impl<'a> From<&'a EdwardsPoint> for NafLookupTable5<AffineNielsPoint> {
-    fn from(A: &'a EdwardsPoint) -> Self {
+impl From<&EdwardsPoint> for NafLookupTable5<AffineNielsPoint> {
+    fn from(A: &EdwardsPoint) -> Self {
         let mut Ai = [A.as_affine_niels(); 8];
         let A2 = A.double();
         for i in 0..7 {
@@ -109,10 +109,10 @@ impl<'a> From<&'a EdwardsPoint> for NafLookupTable5<AffineNielsPoint> {
 /// Holds stuff up to 8. The only time we use tables this big is for precomputed basepoint tables
 /// and multiscalar multiplication (which requires alloc).
 #[derive(Copy, Clone)]
-pub struct NafLookupTable8<T>(pub [T; 64]);
+pub struct NafLookupTable8<Point>(pub [Point; 64]);
 
-impl<T: Copy> NafLookupTable8<T> {
-    pub fn select(&self, x: usize) -> T {
+impl<Point: Copy> NafLookupTable8<Point> {
+    pub fn select(&self, x: usize) -> Point {
         debug_assert_eq!(x & 1, 1);
         debug_assert!(x < 128);
 
@@ -120,7 +120,7 @@ impl<T: Copy> NafLookupTable8<T> {
     }
 }
 
-impl<T: Debug> Debug for NafLookupTable8<T> {
+impl<Point: Debug> Debug for NafLookupTable8<Point> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         writeln!(f, "NafLookupTable8([")?;
         for i in 0..64 {
@@ -132,8 +132,8 @@ impl<T: Debug> Debug for NafLookupTable8<T> {
 
 impl NafLookupTable8<AffineNielsPoint> {}
 
-impl<'a> From<&'a EdwardsPoint> for NafLookupTable8<ProjectiveNielsPoint> {
-    fn from(A: &'a EdwardsPoint) -> Self {
+impl From<&EdwardsPoint> for NafLookupTable8<ProjectiveNielsPoint> {
+    fn from(A: &EdwardsPoint) -> Self {
         let mut Ai = [A.as_projective_niels(); 64];
         let A2 = A.double();
         for i in 0..63 {
@@ -144,8 +144,8 @@ impl<'a> From<&'a EdwardsPoint> for NafLookupTable8<ProjectiveNielsPoint> {
     }
 }
 
-impl<'a> From<&'a EdwardsPoint> for NafLookupTable8<AffineNielsPoint> {
-    fn from(A: &'a EdwardsPoint) -> Self {
+impl From<&EdwardsPoint> for NafLookupTable8<AffineNielsPoint> {
+    fn from(A: &EdwardsPoint) -> Self {
         let mut Ai = [A.as_affine_niels(); 64];
         let A2 = A.double();
         for i in 0..63 {

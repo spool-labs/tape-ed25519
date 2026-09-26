@@ -84,8 +84,8 @@ impl u64x4 {
     ///
     /// Should only be called from `const` contexts. At runtime `splat` is going to be faster.
     #[inline]
-    pub const fn splat_const<const N: u64>() -> Self {
-        Self::new_const(N, N, N, N)
+    pub const fn splat_const<const VALUE: u64>() -> Self {
+        Self::new_const(VALUE, VALUE, VALUE, VALUE)
     }
 
     /// Constructs a new instance.
@@ -139,8 +139,8 @@ impl u32x8 {
     ///
     /// Should only be called from `const` contexts. At runtime `splat` is going to be faster.
     #[inline]
-    pub const fn splat_const<const N: u32>() -> Self {
-        Self::new_const(N, N, N, N, N, N, N, N)
+    pub const fn splat_const<const VALUE: u32>() -> Self {
+        Self::new_const(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE)
     }
 
     /// Constructs a new instance.

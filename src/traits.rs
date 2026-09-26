@@ -27,12 +27,12 @@ pub trait IsIdentity {
 /// Implement generic identity equality testing for a point representations
 /// which have constant-time equality testing and a defined identity
 /// constructor.
-impl<T> IsIdentity for T
+impl<Point> IsIdentity for Point
 where
-    T: ConstantTimeEq + Identity,
+    Point: ConstantTimeEq + Identity,
 {
     fn is_identity(&self) -> bool {
-        self.ct_eq(&T::identity()).into()
+        self.ct_eq(&Point::identity()).into()
     }
 }
 

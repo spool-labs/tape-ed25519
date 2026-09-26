@@ -3,14 +3,14 @@
 /// Define borrow and non-borrow variants of `Add`.
 macro_rules! define_add_variants {
     (LHS = $lhs:ty, RHS = $rhs:ty, Output = $out:ty) => {
-        impl<'b> Add<&'b $rhs> for $lhs {
+        impl Add<&$rhs> for $lhs {
             type Output = $out;
-            fn add(self, rhs: &'b $rhs) -> $out {
+            fn add(self, rhs: &$rhs) -> $out {
                 &self + rhs
             }
         }
 
-        impl<'a> Add<$rhs> for &'a $lhs {
+        impl Add<$rhs> for &$lhs {
             type Output = $out;
             fn add(self, rhs: $rhs) -> $out {
                 self + &rhs
@@ -40,14 +40,14 @@ macro_rules! define_add_assign_variants {
 /// Define borrow and non-borrow variants of `Sub`.
 macro_rules! define_sub_variants {
     (LHS = $lhs:ty, RHS = $rhs:ty, Output = $out:ty) => {
-        impl<'b> Sub<&'b $rhs> for $lhs {
+        impl Sub<&$rhs> for $lhs {
             type Output = $out;
-            fn sub(self, rhs: &'b $rhs) -> $out {
+            fn sub(self, rhs: &$rhs) -> $out {
                 &self - rhs
             }
         }
 
-        impl<'a> Sub<$rhs> for &'a $lhs {
+        impl Sub<$rhs> for &$lhs {
             type Output = $out;
             fn sub(self, rhs: $rhs) -> $out {
                 self - &rhs
@@ -77,14 +77,14 @@ macro_rules! define_sub_assign_variants {
 /// Define borrow and non-borrow variants of `Mul`.
 macro_rules! define_mul_variants {
     (LHS = $lhs:ty, RHS = $rhs:ty, Output = $out:ty) => {
-        impl<'b> Mul<&'b $rhs> for $lhs {
+        impl Mul<&$rhs> for $lhs {
             type Output = $out;
-            fn mul(self, rhs: &'b $rhs) -> $out {
+            fn mul(self, rhs: &$rhs) -> $out {
                 &self * rhs
             }
         }
 
-        impl<'a> Mul<$rhs> for &'a $lhs {
+        impl Mul<$rhs> for &$lhs {
             type Output = $out;
             fn mul(self, rhs: $rhs) -> $out {
                 self * &rhs
@@ -124,14 +124,14 @@ macro_rules! impl_lookup_table {
         /// still technically possible.  It would be nice to prevent direct
         /// access to the table.
         #[derive(Copy, Clone)]
-        pub struct $name<T>(pub [T; $size]);
+        pub struct $name<Point>(pub [Point; $size]);
 
-        impl<T> $name<T>
+        impl<Point> $name<Point>
         where
-            T: Identity + ConditionallySelectable + ConditionallyNegatable,
+            Point: Identity + ConditionallySelectable + ConditionallyNegatable,
         {
             /// Given \\(-8 \leq x \leq 8\\), return \\(xP\\) in constant time.
-            pub fn select(&self, x: i8) -> T {
+            pub fn select(&self, x: i8) -> Point {
                 debug_assert!(x >= $neg);
                 debug_assert!(x as i16 <= $size as i16); // XXX We have to convert to i16s here for the radix-256 case.. this is wrong.
 
@@ -140,7 +140,7 @@ macro_rules! impl_lookup_table {
                 let xabs = (x as i16 + xmask) ^ xmask;
 
                 // Set t = 0 * P = identity
-                let mut t = T::identity();
+                let mut t = Point::identity();
                 for j in $range {
                     // Copy `points[j-1] == j*P` onto `t` in constant time if `|x| == j`.
                     let c = (xabs as u16).ct_eq(&(j as u16));
@@ -156,13 +156,16 @@ macro_rules! impl_lookup_table {
             }
         }
 
-        impl<T: Copy + Default> Default for $name<T> {
-            fn default() -> $name<T> {
-                $name([T::default(); $size])
+        impl<Point> Default for $name<Point>
+        where
+            Point: Copy + Default,
+        {
+            fn default() -> $name<Point> {
+                $name([Point::default(); $size])
             }
         }
 
-        impl<T: Debug> Debug for $name<T> {
+        impl<Point: Debug> Debug for $name<Point> {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 write!(f, "{:?}(", stringify!($name))?;
 
@@ -174,8 +177,8 @@ macro_rules! impl_lookup_table {
             }
         }
 
-        impl<'a> From<&'a EdwardsPoint> for $name<ProjectiveNielsPoint> {
-            fn from(P: &'a EdwardsPoint) -> Self {
+        impl From<&EdwardsPoint> for $name<ProjectiveNielsPoint> {
+            fn from(P: &EdwardsPoint) -> Self {
                 let mut points = [P.as_projective_niels(); $size];
                 for j in $conv_range {
                     points[j + 1] = (P + &points[j]).as_extended().as_projective_niels();
@@ -184,8 +187,8 @@ macro_rules! impl_lookup_table {
             }
         }
 
-        impl<'a> From<&'a EdwardsPoint> for $name<AffineNielsPoint> {
-            fn from(P: &'a EdwardsPoint) -> Self {
+        impl From<&EdwardsPoint> for $name<AffineNielsPoint> {
+            fn from(P: &EdwardsPoint) -> Self {
                 let mut points = [P.as_affine_niels(); $size];
                 // XXX batch inversion would be good if perf mattered here
                 for j in $conv_range {
@@ -319,23 +322,23 @@ macro_rules! impl_basepoint_table {
             }
         }
 
-        impl<'a, 'b> Mul<&'b Scalar> for &'a $name {
+        impl Mul<&Scalar> for &$name {
             type Output = $point;
 
             /// Construct an `EdwardsPoint` from a `Scalar` \\(a\\) by
             /// computing the multiple \\(aB\\) of this basepoint \\(B\\).
-            fn mul(self, scalar: &'b Scalar) -> $point {
+            fn mul(self, scalar: &Scalar) -> $point {
                 // delegate to a private function so that its documentation appears in internal docs
                 self.mul_base(scalar)
             }
         }
 
-        impl<'a, 'b> Mul<&'a $name> for &'b Scalar {
+        impl Mul<&$name> for &Scalar {
             type Output = $point;
 
             /// Construct an `EdwardsPoint` from a `Scalar` \\(a\\) by
             /// computing the multiple \\(aB\\) of this basepoint \\(B\\).
-            fn mul(self, basepoint_table: &'a $name) -> $point {
+            fn mul(self, basepoint_table: &$name) -> $point {
                 basepoint_table * self
             }
         }
@@ -354,14 +357,14 @@ macro_rules! impl_basepoint_table {
 
 macro_rules! impl_basepoint_table_conversions {
     (LHS = $lhs:ty, RHS = $rhs:ty) => {
-        impl<'a> From<&'a $lhs> for $rhs {
-            fn from(table: &'a $lhs) -> $rhs {
+        impl From<&$lhs> for $rhs {
+            fn from(table: &$lhs) -> $rhs {
                 <$rhs>::create(&table.basepoint())
             }
         }
 
-        impl<'a> From<&'a $rhs> for $lhs {
-            fn from(table: &'a $rhs) -> $lhs {
+        impl From<&$rhs> for $lhs {
+            fn from(table: &$rhs) -> $lhs {
                 <$lhs>::create(&table.basepoint())
             }
         }

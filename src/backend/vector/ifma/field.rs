@@ -428,7 +428,7 @@ impl Add<F51x4Unreduced> for F51x4Unreduced {
 }
 
 #[unsafe_target_feature("avx512ifma,avx512vl")]
-impl<'a> Mul<(u32, u32, u32, u32)> for &'a F51x4Reduced {
+impl Mul<(u32, u32, u32, u32)> for &F51x4Reduced {
     type Output = F51x4Unreduced;
     #[inline]
     fn mul(self, scalars: (u32, u32, u32, u32)) -> F51x4Unreduced {
@@ -480,10 +480,10 @@ impl<'a> Mul<(u32, u32, u32, u32)> for &'a F51x4Reduced {
 }
 
 #[unsafe_target_feature("avx512ifma,avx512vl")]
-impl<'a, 'b> Mul<&'b F51x4Reduced> for &'a F51x4Reduced {
+impl Mul<&F51x4Reduced> for &F51x4Reduced {
     type Output = F51x4Unreduced;
     #[inline]
-    fn mul(self, rhs: &'b F51x4Reduced) -> F51x4Unreduced {
+    fn mul(self, rhs: &F51x4Reduced) -> F51x4Unreduced {
         unsafe {
             // Inputs
             let x = &self.0;

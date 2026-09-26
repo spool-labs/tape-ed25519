@@ -338,35 +338,35 @@ impl Index<usize> for Scalar {
     }
 }
 
-impl<'a> MulAssign<&'a Scalar> for Scalar {
-    fn mul_assign(&mut self, _rhs: &'a Scalar) {
+impl MulAssign<&Scalar> for Scalar {
+    fn mul_assign(&mut self, _rhs: &Scalar) {
         *self = UnpackedScalar::mul(&self.unpack(), &_rhs.unpack()).pack();
     }
 }
 
 define_mul_assign_variants!(LHS = Scalar, RHS = Scalar);
 
-impl<'a> Mul<&'a Scalar> for &Scalar {
+impl Mul<&Scalar> for &Scalar {
     type Output = Scalar;
-    fn mul(self, _rhs: &'a Scalar) -> Scalar {
+    fn mul(self, _rhs: &Scalar) -> Scalar {
         UnpackedScalar::mul(&self.unpack(), &_rhs.unpack()).pack()
     }
 }
 
 define_mul_variants!(LHS = Scalar, RHS = Scalar, Output = Scalar);
 
-impl<'a> AddAssign<&'a Scalar> for Scalar {
-    fn add_assign(&mut self, _rhs: &'a Scalar) {
+impl AddAssign<&Scalar> for Scalar {
+    fn add_assign(&mut self, _rhs: &Scalar) {
         *self = *self + _rhs;
     }
 }
 
 define_add_assign_variants!(LHS = Scalar, RHS = Scalar);
 
-impl<'a> Add<&'a Scalar> for &Scalar {
+impl Add<&Scalar> for &Scalar {
     type Output = Scalar;
     #[allow(non_snake_case)]
-    fn add(self, _rhs: &'a Scalar) -> Scalar {
+    fn add(self, _rhs: &Scalar) -> Scalar {
         // The UnpackedScalar::add function produces reduced outputs if the inputs are reduced. By
         // Scalar invariant #1, this is always the case.
         UnpackedScalar::add(&self.unpack(), &_rhs.unpack()).pack()
@@ -375,18 +375,18 @@ impl<'a> Add<&'a Scalar> for &Scalar {
 
 define_add_variants!(LHS = Scalar, RHS = Scalar, Output = Scalar);
 
-impl<'a> SubAssign<&'a Scalar> for Scalar {
-    fn sub_assign(&mut self, _rhs: &'a Scalar) {
+impl SubAssign<&Scalar> for Scalar {
+    fn sub_assign(&mut self, _rhs: &Scalar) {
         *self = *self - _rhs;
     }
 }
 
 define_sub_assign_variants!(LHS = Scalar, RHS = Scalar);
 
-impl<'a> Sub<&'a Scalar> for &Scalar {
+impl Sub<&Scalar> for &Scalar {
     type Output = Scalar;
     #[allow(non_snake_case)]
-    fn sub(self, rhs: &'a Scalar) -> Scalar {
+    fn sub(self, rhs: &Scalar) -> Scalar {
         // The UnpackedScalar::sub function produces reduced outputs if the inputs are reduced. By
         // Scalar invariant #1, this is always the case.
         UnpackedScalar::sub(&self.unpack(), &rhs.unpack()).pack()
@@ -428,25 +428,25 @@ impl ConditionallySelectable for Scalar {
     }
 }
 
-impl<T> Product<T> for Scalar
+impl<Term> Product<Term> for Scalar
 where
-    T: Borrow<Scalar>,
+    Term: Borrow<Scalar>,
 {
-    fn product<I>(iter: I) -> Self
+    fn product<Items>(iter: Items) -> Self
     where
-        I: Iterator<Item = T>,
+        Items: Iterator<Item = Term>,
     {
         iter.fold(Scalar::ONE, |acc, item| acc * item.borrow())
     }
 }
 
-impl<T> Sum<T> for Scalar
+impl<Term> Sum<Term> for Scalar
 where
-    T: Borrow<Scalar>,
+    Term: Borrow<Scalar>,
 {
-    fn sum<I>(iter: I) -> Self
+    fn sum<Items>(iter: Items) -> Self
     where
-        I: Iterator<Item = T>,
+        Items: Iterator<Item = Term>,
     {
         iter.fold(Scalar::ZERO, |acc, item| acc + item.borrow())
     }
@@ -688,10 +688,10 @@ impl Scalar {
     /// assert_eq!(scalars[3], Scalar::from(11u64).invert());
     /// # }
     /// ```
-    pub fn invert_batch<const N: usize>(inputs: &mut [Scalar; N]) -> Scalar {
+    pub fn invert_batch<const COUNT: usize>(inputs: &mut [Scalar; COUNT]) -> Scalar {
         let one: UnpackedScalar = Scalar::ONE.unpack().as_montgomery();
 
-        let mut scratch = [one; N];
+        let mut scratch = [one; COUNT];
 
         Self::invert_batch_internal(inputs, &mut scratch)
     }
