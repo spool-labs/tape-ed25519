@@ -6,6 +6,10 @@
 //! advance in lockstep, each with its own verdict, and no field operation
 //! ever crosses lanes.
 
+#[cfg(curve25519_backend = "simd")]
+#[macro_use]
+mod macros;
+
 pub mod digits;
 pub mod edwards_x8;
 pub mod field_x8;

@@ -3,6 +3,9 @@
 //! Vectorized field and point operations, on a modification of the 4-way parallel formulas of
 //! Hisil, Wong, Carter and Dawson
 
+#[macro_use]
+mod macros;
+
 #[allow(missing_docs)]
 pub mod packed_simd;
 
