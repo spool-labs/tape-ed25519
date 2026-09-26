@@ -27,7 +27,7 @@ use subtle::ConditionallySelectable;
 ///
 /// The backend-specific type `FieldElement51` should not be used
 /// outside of the `solana_ed25519::field` module.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct FieldElement51(pub [u64; 5]);
 
 impl Debug for FieldElement51 {

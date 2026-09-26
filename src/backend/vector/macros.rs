@@ -11,7 +11,7 @@ macro_rules! impl_shared {
         $extract_intrinsic:ident
     ) => {
         #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone, Debug)]
+        #[derive(Clone, Copy, Debug)]
         #[repr(transparent)]
         pub struct $ty(core::arch::x86_64::__m256i);
 

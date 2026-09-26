@@ -132,7 +132,7 @@ use alloc::vec::Vec;
 /// The first 255 bits of a `CompressedEdwardsY` represent the
 /// \\(y\\)-coordinate.  The high bit of the 32nd byte gives the sign of \\(x\\).
 #[allow(clippy::derived_hash_with_manual_eq)]
-#[derive(Copy, Clone, Hash)]
+#[derive(Clone, Copy, Hash)]
 pub struct CompressedEdwardsY(pub [u8; 32]);
 
 impl ConstantTimeEq for CompressedEdwardsY {
@@ -243,7 +243,7 @@ impl TryFrom<&[u8]> for CompressedEdwardsY {
 // ------------------------------------------------------------------------
 
 /// An `EdwardsPoint` represents a point on the Edwards form of Curve25519.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 #[allow(missing_docs)]
 pub struct EdwardsPoint {
     pub X: FieldElement,

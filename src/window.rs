@@ -63,7 +63,7 @@ impl_lookup_table! {
 pub type LookupTableRadix16<Point> = LookupTable<Point>;
 
 /// Holds odd multiples 1A, 3A, ..., 15A of a point A.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct NafLookupTable5<Point>(pub [Point; 8]);
 
 impl<Point: Copy> NafLookupTable5<Point> {
@@ -108,7 +108,7 @@ impl From<&EdwardsPoint> for NafLookupTable5<AffineNielsPoint> {
 
 /// Holds stuff up to 8. The only time we use tables this big is for precomputed basepoint tables
 /// and multiscalar multiplication (which requires alloc).
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct NafLookupTable8<Point>(pub [Point; 64]);
 
 impl<Point: Copy> NafLookupTable8<Point> {

@@ -140,7 +140,7 @@ use crate::traits::ValidityCheck;
 /// More details on the relationships between the different curve models
 /// can be found in the module-level documentation.
 #[allow(missing_docs)]
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub struct ProjectivePoint {
     pub X: FieldElement,
     pub Y: FieldElement,
@@ -154,7 +154,7 @@ pub struct ProjectivePoint {
 ///
 /// More details on the relationships between the different curve models
 /// can be found in the module-level documentation.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 #[allow(missing_docs)]
 pub struct CompletedPoint {
     pub X: FieldElement,
@@ -169,7 +169,7 @@ pub struct CompletedPoint {
 /// More details on the relationships between the different curve models
 /// can be found in the module-level documentation.
 // Safe to derive Eq because affine coordinates.
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 #[allow(missing_docs)]
 pub struct AffineNielsPoint {
     pub y_plus_x: FieldElement,
@@ -182,7 +182,7 @@ pub struct AffineNielsPoint {
 ///
 /// More details on the relationships between the different curve models
 /// can be found in the module-level documentation.
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 #[allow(missing_docs)]
 pub struct ProjectiveNielsPoint {
     pub Y_plus_X: FieldElement,

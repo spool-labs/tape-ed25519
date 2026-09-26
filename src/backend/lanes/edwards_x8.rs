@@ -8,7 +8,7 @@ use crate::constants::{EDWARDS_D, EDWARDS_D2};
 use crate::edwards::EdwardsPoint;
 
 /// Eight extended-coordinate points \\((X : Y : Z : T)\\), one per lane.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExtendedPointX8 {
     pub X: FieldElementX8,
     pub Y: FieldElementX8,
@@ -17,7 +17,7 @@ pub struct ExtendedPointX8 {
 }
 
 /// Eight points in completed form, the output of the addition and doubling formulas.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CompletedPointX8 {
     pub X: FieldElementX8,
     pub Y: FieldElementX8,
@@ -26,7 +26,7 @@ pub struct CompletedPointX8 {
 }
 
 /// Eight projective points \\((X : Y : Z)\\), used on the doubling chain.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ProjectivePointX8 {
     pub X: FieldElementX8,
     pub Y: FieldElementX8,
@@ -34,7 +34,7 @@ pub struct ProjectivePointX8 {
 }
 
 /// Eight cached ("projective Niels") points for readdition.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ProjectiveNielsX8 {
     pub Y_plus_X: FieldElementX8,
     pub Y_minus_X: FieldElementX8,

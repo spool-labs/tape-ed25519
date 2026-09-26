@@ -106,7 +106,7 @@ fn repack_pair(x: u32x8, y: u32x8) -> u32x8 {
 /// having to know details about the data layout of the
 /// `FieldElement2625x4`.
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Lanes {
     C,
     D,
@@ -124,7 +124,7 @@ pub enum Lanes {
 /// (A,B,C,D) \\); for instance, `Shuffle::BADC` turns \\( (A, B, C,
 /// D) \\) into \\( (B, A, D, C) \\).
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Shuffle {
     AAAA,
     BBBB,

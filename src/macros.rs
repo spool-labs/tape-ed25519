@@ -123,7 +123,7 @@ macro_rules! impl_lookup_table {
         /// only `pub` so that we can write hardcoded constants, so it's
         /// still technically possible.  It would be nice to prevent direct
         /// access to the table.
-        #[derive(Copy, Clone)]
+        #[derive(Clone, Copy)]
         pub struct $name<Point>(pub [Point; $size]);
 
         impl<Point> $name<Point>

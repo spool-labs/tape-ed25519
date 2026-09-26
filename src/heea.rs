@@ -16,7 +16,7 @@ use crate::constants;
 
 /// A signed 256-bit integer represented as 4 u64 limbs (little-endian)
 /// Used for the half-extended Euclidean algorithm
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct I256 {
     /// Limbs in little-endian order: [low, ..., high]
     limbs: [u64; 4],

@@ -129,7 +129,7 @@ type UnpackedScalar = backend::serial::u64::scalar::Scalar52;
 
 /// The `Scalar` struct holds an element of \\(\mathbb Z / \ell\mathbb Z \\).
 #[allow(clippy::derived_hash_with_manual_eq)]
-#[derive(Copy, Clone, Hash)]
+#[derive(Clone, Copy, Hash)]
 pub struct Scalar {
     /// `bytes` is a little-endian byte encoding of an integer representing a scalar modulo the
     /// group order.

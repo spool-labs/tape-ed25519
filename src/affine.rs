@@ -6,7 +6,7 @@ use core::ops::Mul;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// Affine Edwards point on untwisted curve.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AffinePoint {
     pub x: FieldElement,
     pub y: FieldElement,

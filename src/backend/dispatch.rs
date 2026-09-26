@@ -10,7 +10,7 @@ use crate::scalar::Scalar;
 const HALF_SCALAR_LENGTH: usize = 16;
 
 /// Which field arithmetic this host runs
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 enum BackendKind {
     #[cfg(curve25519_backend = "simd")]
     Avx2,

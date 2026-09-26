@@ -19,10 +19,10 @@ use crate::window::NafLookupTable8;
 use super::constants;
 use super::field::{F51x4Reduced, F51x4Unreduced, Lanes, Shuffle};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExtendedPoint(pub F51x4Unreduced);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CachedPoint(pub F51x4Reduced);
 
 #[unsafe_target_feature("avx512ifma,avx512vl")]

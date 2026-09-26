@@ -30,15 +30,15 @@ unsafe fn madd52hi(z: u64x4, x: u64x4, y: u64x4) -> u64x4 {
 }
 
 /// A vector of four field elements in radix 2^51, with unreduced coefficients.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct F51x4Unreduced(pub [u64x4; 5]);
 
 /// A vector of four field elements in radix 2^51, with reduced coefficients.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct F51x4Reduced(pub [u64x4; 5]);
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub enum Shuffle {
     AAAA,
     BBBB,
@@ -74,7 +74,7 @@ fn shuffle_lanes(x: u64x4, control: Shuffle) -> u64x4 {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 pub enum Lanes {
     D,
     C,

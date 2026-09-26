@@ -19,7 +19,7 @@ use crate::constants;
 
 /// The `Scalar52` struct represents an element in
 /// \\(\mathbb Z / \ell \mathbb Z\\) as 5 \\(52\\)-bit limbs.
-#[derive(Copy, Clone, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct Scalar52(pub [u64; 5]);
 
 impl Debug for Scalar52 {

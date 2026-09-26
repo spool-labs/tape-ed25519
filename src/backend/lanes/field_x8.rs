@@ -25,7 +25,7 @@ pub type LaneMask = [bool; LANES];
 ///
 /// Limb bounds follow `FieldElement51`: limbs stay below \\(2^{52}\\) between
 /// reductions.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 // Cache-line aligned so the limb rows never straddle two lines.
 #[repr(align(64))]
 pub struct FieldElementX8 {
