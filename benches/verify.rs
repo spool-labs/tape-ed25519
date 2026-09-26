@@ -1,8 +1,4 @@
-//! The verifier against the crates.io `solana-ed25519` the door called before it
-//!
-//! Both sides run the same ZIP-215 rules. On a host without AVX-512 IFMA the batch dispatches to
-//! the single verifier, so the batch rows there measure that the dispatch costs nothing; the lane
-//! gain shows up only on a host that has the vector unit.
+//! Benchmark the verifier against the crates.io `solana-ed25519` verifier under the same ZIP-215 rules
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use ed25519_dalek::Signer;
@@ -49,7 +45,7 @@ fn single(criterion: &mut Criterion) {
     let key = VerifyingKey::from_bytes(encoded).expect("a key from the signer decodes");
     let parsed = Signature::from_bytes(signature);
 
-    // Both keys are decompressed up front, so the row measures the equation and nothing else.
+    // Decompress both keys up front so the row times only the equation
     let zebra_key = solana_ed25519::ed_sigs::VerificationKey::try_from(*encoded)
         .expect("the same key decodes for the crates.io verifier");
     let zebra_signature = solana_ed25519::ed_sigs::Signature::from_bytes(signature);

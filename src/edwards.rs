@@ -1,87 +1,7 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Points on the Edwards form of Curve25519 and their group operations
 
-//! Group operations for Curve25519, in Edwards form.
-//!
-//! ## Encoding and Decoding
-//!
-//! Encoding is done by converting to and from a `CompressedEdwardsY`
-//! struct, which is a typed wrapper around `[u8; 32]`.
-//!
-//! ## Equality Testing
-//!
-//! The `EdwardsPoint` struct implements the [`subtle::ConstantTimeEq`]
-//! trait for constant-time equality checking, and also uses this to
-//! ensure `Eq` equality checking runs in constant time.
-//!
-//! ## Cofactor-related functions
-//!
-//! The order of the group of points on the curve \\(\mathcal E\\)
-//! is \\(|\mathcal E| = 8\ell \\), so its structure is \\( \mathcal
-//! E = \mathcal E\[8\] \times \mathcal E[\ell]\\).  The torsion
-//! subgroup \\( \mathcal E\[8\] \\) consists of eight points of small
-//! order.  Technically, all of \\(\mathcal E\\) is torsion, but we
-//! use the word only to refer to the small \\(\mathcal E\[8\]\\) part, not
-//! the large prime-order \\(\mathcal E[\ell]\\) part.
-//!
-//! To test if a point is in \\( \mathcal E\[8\] \\), use
-//! [`EdwardsPoint::is_small_order`].
-//!
-//! To test if a point is in \\( \mathcal E[\ell] \\), use
-//! [`EdwardsPoint::is_torsion_free`].
-//!
-//! To multiply by the cofactor, use [`EdwardsPoint::mul_by_cofactor`].
-//!
-//! To avoid dealing with cofactors entirely, consider using Ristretto.
-//!
-//! ## Scalars
-//!
-//! Scalars are represented by the [`Scalar`] struct. To construct a scalar, see
-//! [`Scalar::from_canonical_bytes`] or [`Scalar::from_bytes_mod_order_wide`].
-//!
-//! ## Scalar Multiplication
-//!
-//! Scalar multiplication on Edwards points is provided by:
-//!
-//! * the `*` operator between a `Scalar` and a `EdwardsPoint`, which
-//!   performs constant-time variable-base scalar multiplication;
-//!
-//! * the `*` operator between a `Scalar` and a
-//!   `EdwardsBasepointTable`, which performs constant-time fixed-base
-//!   scalar multiplication;
-//!
-//! * an implementation of the
-//!   [`MultiscalarMul`](../traits/trait.MultiscalarMul.html) trait for
-//!   constant-time variable-base multiscalar multiplication;
-//!
-//! * an implementation of the
-//!   [`VartimeMultiscalarMul`](../traits/trait.VartimeMultiscalarMul.html)
-//!   trait for variable-time variable-base multiscalar multiplication;
-//!
-//! ## Implementation
-//!
-//! The Edwards arithmetic is implemented using the “extended twisted
-//! coordinates” of Hisil, Wong, Carter, and Dawson, and the
-//! corresponding complete formulas.  For more details,
-//! see the [`curve_models` submodule][curve_models]
-//! of the internal documentation.
-//!
-//! ## Validity Checking
-//!
-//! There is no function for checking whether a point is valid.
-//! Instead, the `EdwardsPoint` struct is guaranteed to hold a valid
-//! point on the curve.
-//!
-//! We use the Rust type system to make invalid points
-//! unrepresentable: `EdwardsPoint` objects can only be created via
-//! successful decompression of a compressed point, or else by
-//! operations on other (valid) `EdwardsPoint`s.
-//!
-//! [curve_models]: https://docs.rs/curve25519-dalek/latest/curve25519-dalek/backend/serial/curve_models/index.html
+// Vendored from curve25519-dalek, BSD-3-Clause
 
-// We allow non snake_case names because coordinates in projective space are
-// traditionally denoted by the capitalisation of their respective
-// counterparts in affine space.  Yeah, you heard me, rustc, I'm gonna have my
-// affine and projective cakes and eat both of them too.
 #![allow(non_snake_case)]
 
 use core::array::TryFromSliceError;
@@ -122,15 +42,7 @@ use crate::affine::AffinePoint;
 
 use alloc::vec::Vec;
 
-// ------------------------------------------------------------------------
-// Compressed points
-// ------------------------------------------------------------------------
-
-/// In "Edwards y" / "Ed25519" format, the curve point \\((x,y)\\) is
-/// determined by the \\(y\\)-coordinate and the sign of \\(x\\).
-///
-/// The first 255 bits of a `CompressedEdwardsY` represent the
-/// \\(y\\)-coordinate.  The high bit of the 32nd byte gives the sign of \\(x\\).
+/// A point encoded as its y coordinate with the sign of x in the top bit
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Clone, Copy, Hash)]
 pub struct CompressedEdwardsY(pub [u8; 32]);
@@ -155,20 +67,17 @@ impl Debug for CompressedEdwardsY {
 }
 
 impl CompressedEdwardsY {
-    /// View this `CompressedEdwardsY` as an array of bytes.
+    /// The encoded bytes
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
-    /// Copy this `CompressedEdwardsY` to an array of bytes.
+    /// A copy of the encoded bytes
     pub const fn to_bytes(self) -> [u8; 32] {
         self.0
     }
 
-    /// Attempt to decompress to an `EdwardsPoint`.
-    ///
-    /// Returns `None` if the input is not the \\(y\\)-coordinate of a
-    /// curve point.
+    /// Decompress to a point, or `None` when y is not the y coordinate of a curve point
     pub fn decompress(&self) -> Option<EdwardsPoint> {
         let (is_valid_y_coord, X, Y, Z) = decompress::step_1(self);
 
@@ -187,15 +96,15 @@ mod decompress {
     use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
     use crate::field::FieldElement;
 
-    #[rustfmt::skip] // keep alignment of explanatory comments
+    #[rustfmt::skip]
     pub fn step_1(
         repr: &CompressedEdwardsY,
     ) -> (Choice, FieldElement, FieldElement, FieldElement) {
         let Y = FieldElement::from_bytes(repr.as_bytes());
         let Z = FieldElement::ONE;
         let YY = Y.square();
-        let u = &YY - &Z;                            // u =  y²-1
-        let v = &(&YY * &constants::EDWARDS_D) + &Z; // v = dy²+1
+        let u = &YY - &Z;
+        let v = &(&YY * &constants::EDWARDS_D) + &Z;
         let (is_valid_y_coord, X) = FieldElement::sqrt_ratio_i(&u, &v);
 
         (is_valid_y_coord, X, Y, Z)
@@ -208,8 +117,7 @@ mod decompress {
         Y: FieldElement,
         Z: FieldElement,
     ) -> EdwardsPoint {
-         // FieldElement::sqrt_ratio_i always returns the nonnegative square root,
-         // so we negate according to the supplied sign bit.
+        // sqrt_ratio_i returns the nonnegative root, so the encoded sign bit picks the other one
         let compressed_sign_bit = Choice::from(repr.as_bytes()[31] >> 7);
         X.conditional_negate(compressed_sign_bit);
 
@@ -230,19 +138,7 @@ impl TryFrom<&[u8]> for CompressedEdwardsY {
     }
 }
 
-// ------------------------------------------------------------------------
-// Serde support
-// ------------------------------------------------------------------------
-// Serializes to and from `EdwardsPoint` directly, doing compression
-// and decompression internally.  This means that users can create
-// structs containing `EdwardsPoint`s and use Serde's derived
-// serializers to serialize those structures.
-
-// ------------------------------------------------------------------------
-// Internal point representations
-// ------------------------------------------------------------------------
-
-/// An `EdwardsPoint` represents a point on the Edwards form of Curve25519.
+/// A point on the Edwards form of Curve25519 in extended coordinates
 #[derive(Clone, Copy)]
 #[allow(missing_docs)]
 pub struct EdwardsPoint {
@@ -251,10 +147,6 @@ pub struct EdwardsPoint {
     pub Z: FieldElement,
     pub T: FieldElement,
 }
-
-// ------------------------------------------------------------------------
-// Constructors
-// ------------------------------------------------------------------------
 
 impl Identity for CompressedEdwardsY {
     fn identity() -> CompressedEdwardsY {
@@ -272,12 +164,7 @@ impl Default for CompressedEdwardsY {
 }
 
 impl CompressedEdwardsY {
-    /// Construct a `CompressedEdwardsY` from a slice of bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TryFromSliceError`] if the input `bytes` slice does not have
-    /// a length of 32.
+    /// Wrap a slice of bytes, failing when it is not 32 bytes long
     pub fn from_slice(bytes: &[u8]) -> Result<CompressedEdwardsY, TryFromSliceError> {
         bytes.try_into().map(CompressedEdwardsY)
     }
@@ -300,14 +187,6 @@ impl Default for EdwardsPoint {
     }
 }
 
-// ------------------------------------------------------------------------
-// Zeroize implementations for wiping points from memory
-// ------------------------------------------------------------------------
-
-// ------------------------------------------------------------------------
-// Validity checks (for debugging, not CT)
-// ------------------------------------------------------------------------
-
 #[cfg(test)]
 impl ValidityCheck for EdwardsPoint {
     fn is_valid(&self) -> bool {
@@ -317,10 +196,6 @@ impl ValidityCheck for EdwardsPoint {
         point_on_curve && on_segre_image
     }
 }
-
-// ------------------------------------------------------------------------
-// Constant-time assignment
-// ------------------------------------------------------------------------
 
 impl ConditionallySelectable for EdwardsPoint {
     fn conditional_select(a: &EdwardsPoint, b: &EdwardsPoint, choice: Choice) -> EdwardsPoint {
@@ -333,18 +208,9 @@ impl ConditionallySelectable for EdwardsPoint {
     }
 }
 
-// ------------------------------------------------------------------------
-// Equality
-// ------------------------------------------------------------------------
-
 impl ConstantTimeEq for EdwardsPoint {
     fn ct_eq(&self, other: &EdwardsPoint) -> Choice {
-        // We would like to check that the point (X/Z, Y/Z) is equal to
-        // the point (X'/Z', Y'/Z') without converting into affine
-        // coordinates (x, y) and (x', y'), which requires two inversions.
-        // We have that X = xZ and X' = x'Z'. Thus, x = x' is equivalent to
-        // (xZ)Z' = (x'Z')Z, and similarly for the y-coordinate.
-
+        // Cross-multiplying by the other Z compares affine coordinates without an inversion
         (&self.X * &other.Z).ct_eq(&(&other.X * &self.Z))
             & (&self.Y * &other.Z).ct_eq(&(&other.Y * &self.Z))
     }
@@ -358,12 +224,8 @@ impl PartialEq for EdwardsPoint {
 
 impl Eq for EdwardsPoint {}
 
-// ------------------------------------------------------------------------
-// Point conversions
-// ------------------------------------------------------------------------
-
 impl EdwardsPoint {
-    /// Convert to a ProjectiveNielsPoint
+    /// Convert to the projective Niels form used as an addition operand
     pub fn as_projective_niels(&self) -> ProjectiveNielsPoint {
         ProjectiveNielsPoint {
             Y_plus_X: &self.Y + &self.X,
@@ -373,10 +235,7 @@ impl EdwardsPoint {
         }
     }
 
-    /// Convert the representation of this point from extended
-    /// coordinates to projective coordinates.
-    ///
-    /// Free.
+    /// Drop T to get projective coordinates
     pub const fn as_projective(&self) -> ProjectivePoint {
         ProjectivePoint {
             X: self.X,
@@ -385,8 +244,7 @@ impl EdwardsPoint {
         }
     }
 
-    /// Dehomogenize to a `AffineNielsPoint`.
-    /// Mainly for testing.
+    /// Convert to the affine Niels form, which costs one inversion
     pub fn as_affine_niels(&self) -> AffineNielsPoint {
         let recip = self.Z.invert();
         let x = &self.X * &recip;
@@ -399,7 +257,7 @@ impl EdwardsPoint {
         }
     }
 
-    /// Dehomogenize to `AffinePoint`.
+    /// Convert to affine coordinates
     pub fn to_affine(self) -> AffinePoint {
         let recip = self.Z.invert();
         let x = &self.X * &recip;
@@ -407,13 +265,12 @@ impl EdwardsPoint {
         AffinePoint { x, y }
     }
 
-    /// Compress this point to `CompressedEdwardsY` format.
+    /// Encode this point as its compressed y coordinate
     pub fn compress(&self) -> CompressedEdwardsY {
         self.to_affine().compress()
     }
 
-    /// Compress several `EdwardsPoint`s into `CompressedEdwardsY` format, using a batch inversion
-    /// for a significant speedup.
+    /// Encode several points with one shared batch inversion
     pub fn compress_batch(inputs: &[EdwardsPoint]) -> Vec<CompressedEdwardsY> {
         let mut zs = inputs.iter().map(|input| input.Z).collect::<Vec<_>>();
         FieldElement::invert_batch_alloc(&mut zs);
@@ -430,20 +287,12 @@ impl EdwardsPoint {
     }
 }
 
-// ------------------------------------------------------------------------
-// Doubling
-// ------------------------------------------------------------------------
-
 impl EdwardsPoint {
-    /// Add this point to itself.
+    /// Add this point to itself
     pub fn double(&self) -> EdwardsPoint {
         self.as_projective().double().as_extended()
     }
 }
-
-// ------------------------------------------------------------------------
-// Addition and Subtraction
-// ------------------------------------------------------------------------
 
 impl Add<&EdwardsPoint> for &EdwardsPoint {
     type Output = EdwardsPoint;
@@ -499,10 +348,6 @@ where
     }
 }
 
-// ------------------------------------------------------------------------
-// Negation
-// ------------------------------------------------------------------------
-
 impl Neg for &EdwardsPoint {
     type Output = EdwardsPoint;
 
@@ -524,10 +369,6 @@ impl Neg for EdwardsPoint {
     }
 }
 
-// ------------------------------------------------------------------------
-// Scalar multiplication
-// ------------------------------------------------------------------------
-
 impl MulAssign<&Scalar> for EdwardsPoint {
     fn mul_assign(&mut self, scalar: &Scalar) {
         let result = (self as &EdwardsPoint) * scalar;
@@ -542,10 +383,7 @@ define_mul_variants!(LHS = Scalar, RHS = EdwardsPoint, Output = EdwardsPoint);
 
 impl Mul<&Scalar> for &EdwardsPoint {
     type Output = EdwardsPoint;
-    /// Scalar multiplication: compute `scalar * self`.
-    ///
-    /// For scalar multiplication of a basepoint,
-    /// `EdwardsBasepointTable` is approximately 4x faster.
+    /// Multiply this point by `scalar` in constant time
     fn mul(self, scalar: &Scalar) -> EdwardsPoint {
         dispatch::variable_base_mul(self, scalar)
     }
@@ -554,48 +392,32 @@ impl Mul<&Scalar> for &EdwardsPoint {
 impl Mul<&EdwardsPoint> for &Scalar {
     type Output = EdwardsPoint;
 
-    /// Scalar multiplication: compute `scalar * self`.
-    ///
-    /// For scalar multiplication of a basepoint,
-    /// `EdwardsBasepointTable` is approximately 4x faster.
+    /// Multiply `point` by this scalar in constant time
     fn mul(self, point: &EdwardsPoint) -> EdwardsPoint {
         point * self
     }
 }
 
 impl EdwardsPoint {
-    /// Fixed-base scalar multiplication by the Ed25519 base point.
-    ///
-    /// Uses precomputed basepoint tables when the `precomputed-tables` feature
-    /// is enabled, trading off increased code size for ~4x better performance.
+    /// Multiply the Ed25519 basepoint by `scalar` with the precomputed table
     pub fn mul_base(scalar: &Scalar) -> Self {
         {
             scalar * constants::ED25519_BASEPOINT_TABLE
         }
     }
 
-    /// Multiply this point by `clamp_integer(bytes)`. For a description of clamping, see
-    /// [`clamp_integer`].
+    /// Multiply this point by `clamp_integer(bytes)`
     pub fn mul_clamped(self, bytes: [u8; 32]) -> Self {
-        // We have to construct a Scalar that is not reduced mod l, which breaks scalar invariant
-        // #2. But #2 is not necessary for correctness of variable-base multiplication. All that
-        // needs to hold is invariant #1, i.e., the scalar is less than 2^255. This is guaranteed
-        // by clamping.
-        // Further, we don't do any reduction or arithmetic with this clamped value, so there's no
-        // issues arising from the fact that the curve point is not necessarily in the prime-order
-        // subgroup.
+        // Point multiplication only needs the scalar below 2^255, which clamping guarantees
         let s = Scalar {
             bytes: clamp_integer(bytes),
         };
         s * self
     }
 
-    /// Multiply the basepoint by `clamp_integer(bytes)`. For a description of clamping, see
-    /// [`clamp_integer`].
+    /// Multiply the basepoint by `clamp_integer(bytes)`
     pub fn mul_base_clamped(bytes: [u8; 32]) -> Self {
-        // See reasoning in Self::mul_clamped why it is OK to make an unreduced Scalar here. We
-        // note that fixed-base multiplication is also defined for all values of `bytes` less than
-        // 2^255.
+        // Fixed-base multiplication also only needs the scalar below 2^255
         let s = Scalar {
             bytes: clamp_integer(bytes),
         };
@@ -603,15 +425,8 @@ impl EdwardsPoint {
     }
 }
 
-// ------------------------------------------------------------------------
-// Multiscalar Multiplication impls
-// ------------------------------------------------------------------------
-
-// These use the iterator's size hint and the target settings to
-// forward to a specific backend implementation.
-
 impl EdwardsPoint {
-    /// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
+    /// Compute aA + bB in variable time, where B is the Ed25519 basepoint
     pub fn vartime_double_scalar_mul_basepoint(
         a: &Scalar,
         A: &EdwardsPoint,
@@ -621,7 +436,7 @@ impl EdwardsPoint {
     }
 }
 
-// The number of additions required is ceil(256/w) where w is the radix representation.
+// A radix 2^w table needs ceil(256 / w) additions, plus one for the top digit at w = 8
 impl_basepoint_table! {
     Name = EdwardsBasepointTable,
     LookupTable = LookupTableRadix16,
@@ -658,15 +473,9 @@ impl_basepoint_table! {
     Additions = 33
 }
 
-/// A type-alias for [`EdwardsBasepointTable`] because the latter is
-/// used as a constructor in the [`constants`] module.
-//
-// Same as for `LookupTableRadix16`, we have to define `EdwardsBasepointTable`
-// first, because it's used as a constructor, and then provide a type alias for
-// it.
+/// The radix-16 basepoint table aliased to match the other radix tables
 pub type EdwardsBasepointTableRadix16 = EdwardsBasepointTable;
 
-// Conversions from radix 16
 impl_basepoint_table_conversions! {
     LHS = EdwardsBasepointTableRadix16,
     RHS = EdwardsBasepointTableRadix32
@@ -684,7 +493,6 @@ impl_basepoint_table_conversions! {
     RHS = EdwardsBasepointTableRadix256
 }
 
-// Conversions from radix 32
 impl_basepoint_table_conversions! {
     LHS = EdwardsBasepointTableRadix32,
     RHS = EdwardsBasepointTableRadix64
@@ -698,7 +506,6 @@ impl_basepoint_table_conversions! {
     RHS = EdwardsBasepointTableRadix256
 }
 
-// Conversions from radix 64
 impl_basepoint_table_conversions! {
     LHS = EdwardsBasepointTableRadix64,
     RHS = EdwardsBasepointTableRadix128
@@ -708,27 +515,23 @@ impl_basepoint_table_conversions! {
     RHS = EdwardsBasepointTableRadix256
 }
 
-// Conversions from radix 128
 impl_basepoint_table_conversions! {
     LHS = EdwardsBasepointTableRadix128,
     RHS = EdwardsBasepointTableRadix256
 }
 
 impl EdwardsPoint {
-    /// Multiply by the cofactor: return \\(\[8\]P\\).
+    /// Multiply by the cofactor 8
     pub fn mul_by_cofactor(&self) -> EdwardsPoint {
         self.mul_by_pow_2(3)
     }
 
-    /// Check whether this point is the identity, in variable time.
-    ///
-    /// The identity is \\((0 : Z : Z : 0)\\) in extended coordinates, so unlike
-    /// the constant-time `is_identity` this needs no field multiplications.
+    /// Check for the identity in variable time, which needs no field multiplications
     pub fn is_identity_vartime(&self) -> bool {
         bool::from(self.X.is_zero()) && bool::from((&self.Y - &self.Z).is_zero())
     }
 
-    /// Compute \\([2\^k] P \\) by successive doublings. Requires \\( k > 0 \\).
+    /// Compute [2^k]P by k successive doublings, where k is at least one
     pub fn mul_by_pow_2(&self, k: u32) -> EdwardsPoint {
         debug_assert!(k > 0);
         let mut r: CompletedPoint;
@@ -737,71 +540,20 @@ impl EdwardsPoint {
             r = s.double();
             s = r.as_projective();
         }
-        // Unroll last iteration so we can go directly as_extended()
+        // The last doubling converts straight to extended coordinates
         s.double().as_extended()
     }
 
-    /// Determine if this point is of small order.
-    ///
-    /// # Return
-    ///
-    /// * `true` if `self` is in the torsion subgroup \\( \mathcal E\[8\] \\);
-    /// * `false` if `self` is not in the torsion subgroup \\( \mathcal E\[8\] \\).
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use solana_ed25519::constants;
-    ///
-    /// // Generator of the prime-order subgroup
-    /// let P = constants::ED25519_BASEPOINT_POINT;
-    /// // Generator of the torsion subgroup
-    /// let Q = constants::EIGHT_TORSION[1];
-    ///
-    /// // P has large order
-    /// assert_eq!(P.is_small_order(), false);
-    ///
-    /// // Q has small order
-    /// assert_eq!(Q.is_small_order(), true);
-    /// ```
+    /// Check whether this point lies in the torsion subgroup of order 8
     pub fn is_small_order(&self) -> bool {
         self.mul_by_cofactor().is_identity()
     }
 
-    /// Determine if this point is “torsion-free”, i.e., is contained in
-    /// the prime-order subgroup.
-    ///
-    /// # Return
-    ///
-    /// * `true` if `self` has zero torsion component and is in the
-    ///   prime-order subgroup;
-    /// * `false` if `self` has a nonzero torsion component and is not
-    ///   in the prime-order subgroup.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use solana_ed25519::constants;
-    ///
-    /// // Generator of the prime-order subgroup
-    /// let P = constants::ED25519_BASEPOINT_POINT;
-    /// // Generator of the torsion subgroup
-    /// let Q = constants::EIGHT_TORSION[1];
-    ///
-    /// // P is torsion-free
-    /// assert_eq!(P.is_torsion_free(), true);
-    ///
-    /// // P + Q is not torsion-free
-    /// assert_eq!((P+Q).is_torsion_free(), false);
-    /// ```
+    /// Check whether this point lies in the prime-order subgroup
     pub fn is_torsion_free(&self) -> bool {
         (self * constants::BASEPOINT_ORDER).is_identity()
     }
 }
-
-// ------------------------------------------------------------------------
-// Debug traits
-// ------------------------------------------------------------------------
 
 impl Debug for EdwardsPoint {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -813,14 +565,6 @@ impl Debug for EdwardsPoint {
     }
 }
 
-// ------------------------------------------------------------------------
-// group traits
-// ------------------------------------------------------------------------
-
-// ------------------------------------------------------------------------
-// Tests
-// ------------------------------------------------------------------------
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -828,29 +572,28 @@ mod test {
     use crate::constants::ED25519_BASEPOINT_TABLE;
     use crate::scalar::test::LARGEST_UNREDUCED_SCALAR;
 
-    /// X coordinate of the basepoint.
-    /// = 15112221349535400772501151409588531511454012693041857206046113283949847762202
+    /// The x coordinate of the basepoint
     static BASE_X_COORD_BYTES: [u8; 32] = [
         0x1a, 0xd5, 0x25, 0x8f, 0x60, 0x2d, 0x56, 0xc9, 0xb2, 0xa7, 0x25, 0x95, 0x60, 0xc7, 0x2c,
         0x69, 0x5c, 0xdc, 0xd6, 0xfd, 0x31, 0xe2, 0xa4, 0xc0, 0xfe, 0x53, 0x6e, 0xcd, 0xd3, 0x36,
         0x69, 0x21,
     ];
 
-    /// Compressed Edwards Y form of 2*basepoint.
+    /// The encoding of 2B
     static BASE2_CMPRSSD: CompressedEdwardsY = CompressedEdwardsY([
         0xc9, 0xa3, 0xf8, 0x6a, 0xae, 0x46, 0x5f, 0xe, 0x56, 0x51, 0x38, 0x64, 0x51, 0x0f, 0x39,
         0x97, 0x56, 0x1f, 0xa2, 0xc9, 0xe8, 0x5e, 0xa2, 0x1d, 0xc2, 0x29, 0x23, 0x09, 0xf3, 0xcd,
         0x60, 0x22,
     ]);
 
-    /// Compressed Edwards Y form of 16*basepoint.
+    /// The encoding of 16B
     static BASE16_CMPRSSD: CompressedEdwardsY = CompressedEdwardsY([
         0xeb, 0x27, 0x67, 0xc1, 0x37, 0xab, 0x7a, 0xd8, 0x27, 0x9c, 0x07, 0x8e, 0xff, 0x11, 0x6a,
         0xb0, 0x78, 0x6e, 0xad, 0x3a, 0x2e, 0x0f, 0x98, 0x9f, 0x72, 0xc3, 0x7f, 0x82, 0xf2, 0x96,
         0x96, 0x70,
     ]);
 
-    /// 4493907448824000747700850167940867464579944529806937181821189941592931634714
+    /// A fixed test scalar
     pub static A_SCALAR: Scalar = Scalar {
         bytes: [
             0x1a, 0x0e, 0x97, 0x8a, 0x90, 0xf6, 0x62, 0x2d, 0x37, 0x47, 0x02, 0x3f, 0x8a, 0xd8,
@@ -859,7 +602,7 @@ mod test {
         ],
     };
 
-    /// 2506056684125797857694181776241676200180934651973138769173342316833279714961
+    /// A second fixed test scalar
     pub static B_SCALAR: Scalar = Scalar {
         bytes: [
             0x91, 0x26, 0x7a, 0xcf, 0x25, 0xc2, 0x09, 0x1b, 0xa2, 0x17, 0x74, 0x7b, 0x66, 0xf0,
@@ -868,22 +611,21 @@ mod test {
         ],
     };
 
-    /// A_SCALAR * basepoint, computed with ed25519.py
+    /// The encoding of `A_SCALAR` times the basepoint
     pub static A_TIMES_BASEPOINT: CompressedEdwardsY = CompressedEdwardsY([
         0xea, 0x27, 0xe2, 0x60, 0x53, 0xdf, 0x1b, 0x59, 0x56, 0xf1, 0x4d, 0x5d, 0xec, 0x3c, 0x34,
         0xc3, 0x84, 0xa2, 0x69, 0xb7, 0x4c, 0xc3, 0x80, 0x3e, 0xa8, 0xe2, 0xe7, 0xc9, 0x42, 0x5e,
         0x40, 0xa5,
     ]);
 
-    /// A_SCALAR * (A_TIMES_BASEPOINT) + B_SCALAR * BASEPOINT
-    /// computed with ed25519.py
+    /// The encoding of `A_SCALAR` times `A_TIMES_BASEPOINT` plus `B_SCALAR` times the basepoint
     static DOUBLE_SCALAR_MULT_RESULT: CompressedEdwardsY = CompressedEdwardsY([
         0x7d, 0xfd, 0x6c, 0x45, 0xaf, 0x6d, 0x6e, 0x0e, 0xba, 0x20, 0x37, 0x1a, 0x23, 0x64, 0x59,
         0xc4, 0xc0, 0x46, 0x83, 0x43, 0xde, 0x70, 0x4b, 0x85, 0x09, 0x6f, 0xfe, 0x35, 0x4f, 0x13,
         0x2b, 0x42,
     ]);
 
-    /// Test round-trip decompression for the basepoint.
+    /// The basepoint decompresses to the known x and compresses back
     #[test]
     fn basepoint_decompression_compression() {
         let base_X = FieldElement::from_bytes(&BASE_X_COORD_BYTES);
@@ -891,29 +633,25 @@ mod test {
             .decompress()
             .expect("basepoint should decompress");
         assert!(bp.is_valid());
-        // Check that decompression actually gives the correct X coordinate
         assert_eq!(base_X, bp.X);
         assert_eq!(bp.compress(), constants::ED25519_BASEPOINT_COMPRESSED);
     }
 
-    /// Test sign handling in decompression
+    /// Setting the sign bit decompresses to the negated basepoint
     #[test]
     fn decompression_sign_handling() {
-        // Manually set the high bit of the last byte to flip the sign
         let mut minus_basepoint_bytes = *constants::ED25519_BASEPOINT_COMPRESSED.as_bytes();
         minus_basepoint_bytes[31] |= 1 << 7;
         let minus_basepoint = CompressedEdwardsY(minus_basepoint_bytes)
             .decompress()
             .expect("minus basepoint should decompress");
-        // Test projective coordinates exactly since we know they should
-        // only differ by a flipped sign.
         assert_eq!(minus_basepoint.X, -(&constants::ED25519_BASEPOINT_POINT.X));
         assert_eq!(minus_basepoint.Y, constants::ED25519_BASEPOINT_POINT.Y);
         assert_eq!(minus_basepoint.Z, constants::ED25519_BASEPOINT_POINT.Z);
         assert_eq!(minus_basepoint.T, -(&constants::ED25519_BASEPOINT_POINT.T));
     }
 
-    /// Test that computing 1*basepoint gives the correct basepoint.
+    /// One times the basepoint table gives the basepoint
     #[test]
     fn basepoint_mult_one_vs_basepoint() {
         let bp = ED25519_BASEPOINT_TABLE * &Scalar::ONE;
@@ -921,15 +659,14 @@ mod test {
         assert_eq!(compressed, constants::ED25519_BASEPOINT_COMPRESSED);
     }
 
-    /// Test that `EdwardsBasepointTable::basepoint()` gives the correct basepoint.
+    /// The table hands back the basepoint it was built from
     #[test]
     fn basepoint_table_basepoint_function_correct() {
         let bp = ED25519_BASEPOINT_TABLE.basepoint();
         assert_eq!(bp.compress(), constants::ED25519_BASEPOINT_COMPRESSED);
     }
 
-    /// Test `impl Add<EdwardsPoint> for EdwardsPoint`
-    /// using basepoint + basepoint versus the 2*basepoint constant.
+    /// Extended addition of B to itself gives 2B
     #[test]
     fn basepoint_plus_basepoint_vs_basepoint2() {
         let bp = constants::ED25519_BASEPOINT_POINT;
@@ -937,8 +674,7 @@ mod test {
         assert_eq!(bp_added.compress(), BASE2_CMPRSSD);
     }
 
-    /// Test `impl Add<ProjectiveNielsPoint> for EdwardsPoint`
-    /// using the basepoint, basepoint2 constants
+    /// Adding B in projective Niels form gives 2B
     #[test]
     fn basepoint_plus_basepoint_projective_niels_vs_basepoint2() {
         let bp = constants::ED25519_BASEPOINT_POINT;
@@ -946,8 +682,7 @@ mod test {
         assert_eq!(bp_added.compress(), BASE2_CMPRSSD);
     }
 
-    /// Test `impl Add<AffineNielsPoint> for EdwardsPoint`
-    /// using the basepoint, basepoint2 constants
+    /// Adding B in affine Niels form gives 2B
     #[test]
     fn basepoint_plus_basepoint_affine_niels_vs_basepoint2() {
         let bp = constants::ED25519_BASEPOINT_POINT;
@@ -956,8 +691,7 @@ mod test {
         assert_eq!(bp_added.compress(), BASE2_CMPRSSD);
     }
 
-    /// Check that equality of `EdwardsPoints` handles projective
-    /// coordinates correctly.
+    /// Equality holds across different projective scalings
     #[test]
     fn extended_point_equality_handles_scaling() {
         let mut two_bytes = [0u8; 32];
@@ -972,31 +706,31 @@ mod test {
         assert!(bool::from(id1.ct_eq(&id2)));
     }
 
-    /// Sanity check for conversion to precomputed points
+    /// The affine Niels form of aB adds back to aB
     #[test]
     fn to_affine_niels_clears_denominators() {
-        // construct a point as aB so it has denominators (ie. Z != 1)
+        // aB has Z other than one, so the conversion has a denominator to clear
         let aB = ED25519_BASEPOINT_TABLE * &A_SCALAR;
         let aB_affine_niels = aB.as_affine_niels();
         let also_aB = (&EdwardsPoint::identity() + &aB_affine_niels).as_extended();
         assert_eq!(aB.compress(), also_aB.compress());
     }
 
-    /// Test mul_base versus a known scalar multiple from ed25519.py
+    /// Fixed-base multiplication matches the known multiple
     #[test]
     fn basepoint_mult_vs_ed25519py() {
         let aB = EdwardsPoint::mul_base(&A_SCALAR);
         assert_eq!(aB.compress(), A_TIMES_BASEPOINT);
     }
 
-    /// Test that multiplication by the basepoint order kills the basepoint
+    /// The basepoint order times the basepoint is the identity
     #[test]
     fn basepoint_mult_by_basepoint_order() {
         let should_be_id = EdwardsPoint::mul_base(&constants::BASEPOINT_ORDER);
         assert!(should_be_id.is_identity());
     }
 
-    /// Test precomputed basepoint mult
+    /// The table and variable-base multiplication agree
     #[test]
     fn test_precomputed_basepoint_mult() {
         let aB_1 = ED25519_BASEPOINT_TABLE * &A_SCALAR;
@@ -1004,14 +738,14 @@ mod test {
         assert_eq!(aB_1.compress(), aB_2.compress());
     }
 
-    /// Test scalar_mul versus a known scalar multiple from ed25519.py
+    /// Variable-base multiplication matches the known multiple
     #[test]
     fn scalar_mul_vs_ed25519py() {
         let aB = constants::ED25519_BASEPOINT_POINT * A_SCALAR;
         assert_eq!(aB.compress(), A_TIMES_BASEPOINT);
     }
 
-    /// Test basepoint.double() versus the 2*basepoint constant.
+    /// Doubling the basepoint gives 2B
     #[test]
     fn basepoint_double_vs_basepoint2() {
         assert_eq!(
@@ -1020,7 +754,7 @@ mod test {
         );
     }
 
-    /// Test that computing 2*basepoint is the same as basepoint.double()
+    /// Two times the basepoint gives 2B
     #[test]
     fn basepoint_mult_two_vs_basepoint2() {
         let two = Scalar::from(2u64);
@@ -1028,7 +762,7 @@ mod test {
         assert_eq!(bp2.compress(), BASE2_CMPRSSD);
     }
 
-    /// Test that all the basepoint table types compute the same results.
+    /// Every table radix gives the same multiple
     #[test]
     fn basepoint_tables() {
         let P = &constants::ED25519_BASEPOINT_POINT;
@@ -1054,8 +788,7 @@ mod test {
         assert_eq!(aP128, aP256);
     }
 
-    /// Check unreduced scalar multiplication by the basepoint tables is the same no matter what
-    /// radix the table is.
+    /// Every table radix gives the same multiple of the largest unreduced scalar
     #[test]
     fn basepoint_tables_unreduced_scalar() {
         let P = &constants::ED25519_BASEPOINT_POINT;
@@ -1081,7 +814,7 @@ mod test {
         assert_eq!(aP128, aP256);
     }
 
-    /// Check that converting to projective and then back to extended round-trips.
+    /// Projective and back to extended keeps the basepoint
     #[test]
     fn basepoint_projective_extended_round_trip() {
         assert_eq!(
@@ -1093,7 +826,7 @@ mod test {
         );
     }
 
-    /// Test computing 16*basepoint vs mul_by_pow_2(4)
+    /// Four doublings of the basepoint give 16B
     #[test]
     fn basepoint16_vs_mul_by_pow_2_4() {
         let bp16 = constants::ED25519_BASEPOINT_POINT.mul_by_pow_2(4);
@@ -1102,7 +835,6 @@ mod test {
 
     #[test]
     fn impl_sum() {
-        // Test that sum works for non-empty iterators
         let BASE = constants::ED25519_BASEPOINT_POINT;
 
         let s1 = Scalar::from(999u64);
@@ -1116,13 +848,13 @@ mod test {
 
         assert_eq!(sum, P1 + P2);
 
-        // Test that sum works for the empty iterator
+        // An empty sum is the identity
         let empty_array: [EdwardsPoint; 0] = [];
         let sum: EdwardsPoint = empty_array.iter().sum();
 
         assert_eq!(sum, EdwardsPoint::identity());
 
-        // Test that sum works on owning iterators
+        // Sum also takes owned points
         let s = Scalar::from(2u64);
         let mapped = arr.iter().map(|x| x * s);
         let sum: EdwardsPoint = mapped.sum();
@@ -1130,7 +862,7 @@ mod test {
         assert_eq!(sum, P1 * s + P2 * s);
     }
 
-    /// Test that the conditional assignment trait works for AffineNielsPoints.
+    /// Conditional assignment copies only when the choice is set
     #[test]
     fn conditional_assign_for_affine_niels_point() {
         let id = AffineNielsPoint::identity();
@@ -1145,9 +877,7 @@ mod test {
 
     #[test]
     fn is_small_order() {
-        // The basepoint has large prime order
         assert!(!constants::ED25519_BASEPOINT_POINT.is_small_order());
-        // constants::EIGHT_TORSION has all points of small order.
         for torsion_point in &constants::EIGHT_TORSION {
             assert!(torsion_point.is_small_order());
         }
@@ -1172,21 +902,10 @@ mod test {
         assert!(!constants::ED25519_BASEPOINT_POINT.is_identity());
     }
 
-    /// Rust's debug builds have overflow and underflow trapping,
-    /// and enable `debug_assert!()`.  This performs many scalar
-    /// multiplications to attempt to trigger possible overflows etc.
-    ///
-    /// For instance, the `u64` `Mul` implementation for
-    /// `FieldElements` requires the input `Limb`s to be bounded by
-    /// 2^54, but we cannot enforce this dynamically at runtime, or
-    /// statically at compile time (until Rust gets type-level
-    /// integers, at which point we can encode "bits of headroom" into
-    /// the type system and prove correctness).
+    /// Many multiplications in a row trip no overflow check or debug assertion
     #[test]
     fn monte_carlo_overflow_underflow_debug_assert_test() {
         let mut P = constants::ED25519_BASEPOINT_POINT;
-        // N.B. each scalar_mul does 1407 field mults, 1024 field squarings,
-        // so this does ~ 1M of each operation.
         for _ in 0..1_000 {
             P *= &A_SCALAR;
         }
@@ -1203,7 +922,7 @@ mod test {
         assert!(P1.compress().to_bytes() == P2.compress().to_bytes());
     }
 
-    /// Test double_scalar_mul_vartime vs ed25519.py
+    /// The double-base multiplication matches the known result
     #[test]
     fn double_scalar_mul_basepoint_vs_ed25519py() {
         let A = A_TIMES_BASEPOINT

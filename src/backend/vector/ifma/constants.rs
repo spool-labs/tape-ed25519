@@ -1,6 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Identity points and basepoint tables for the AVX-512 IFMA backend
 
-//! This module contains constants used by the IFMA backend.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 use crate::backend::vector::packed_simd::u64x4;
 
@@ -9,7 +9,7 @@ use crate::window::NafLookupTable8;
 use super::edwards::{CachedPoint, ExtendedPoint};
 use super::field::{F51x4Reduced, F51x4Unreduced};
 
-/// The identity element as an `ExtendedPoint`.
+/// The identity element as an `ExtendedPoint`
 pub static EXTENDEDPOINT_IDENTITY: ExtendedPoint = ExtendedPoint(F51x4Unreduced([
     u64x4::new_const(0, 1, 1, 0),
     u64x4::new_const(0, 0, 0, 0),
@@ -18,7 +18,7 @@ pub static EXTENDEDPOINT_IDENTITY: ExtendedPoint = ExtendedPoint(F51x4Unreduced(
     u64x4::new_const(0, 0, 0, 0),
 ]));
 
-/// The identity element as a `CachedPoint`.
+/// The identity element as a `CachedPoint`
 pub static CACHEDPOINT_IDENTITY: CachedPoint = CachedPoint(F51x4Reduced([
     u64x4::new_const(121647, 121666, 243332, 2251799813685229),
     u64x4::new_const(2251799813685248, 0, 0, 2251799813685247),
@@ -27,7 +27,7 @@ pub static CACHEDPOINT_IDENTITY: CachedPoint = CachedPoint(F51x4Reduced([
     u64x4::new_const(2251799813685247, 0, 0, 2251799813685247),
 ]));
 
-/// Odd multiples of the Ed25519 basepoint:
+/// Odd multiples `B, 3B, ..., 127B` of the Ed25519 basepoint
 pub static BASEPOINT_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLookupTable8([
     CachedPoint(F51x4Reduced([
         u64x4::new_const(1277522120965857, 73557767439946, 243332, 1943719795065404),
@@ -2054,11 +2054,7 @@ pub static BASEPOINT_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLookupT
     ])),
 ]);
 
-/// Odd multiples `[B', 3B', ..., 127B']` of `B' = B * 2^128`, where `B` is the
-/// Ed25519 basepoint.
-///
-/// The encoding is projective, so these canonical limbs are a different
-/// representative of the same points than runtime conversion produces.
+/// Odd multiples `B', 3B', ..., 127B'` of `B' = B 2^128` in their own projective representatives
 pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLookupTable8([
     CachedPoint(F51x4Reduced([
         u64x4::new_const(
@@ -4118,10 +4114,7 @@ mod test {
 
     use crate::window::NafLookupTable8;
 
-    /// Assert that two `CachedPoint`s encode the same point.
-    ///
-    /// The encoding is projective, so this cross-multiplies by the `C` lanes
-    /// rather than comparing limbs.
+    /// Assert that two projective `CachedPoint`s encode the same point by cross-multiplying the `C` lanes
     fn assert_same_cached_point(s: &CachedPoint, r: &CachedPoint, i: usize) {
         let [sa, sb, sc, sd] = F51x4Unreduced::from(s.0).split();
         let [ra, rb, rc, rd] = F51x4Unreduced::from(r.0).split();

@@ -12,7 +12,7 @@ use crate::signature::Signature;
 use crate::tests::util::{hex, low_order_encodings, small_order_cases, ZIP215_MESSAGE};
 use crate::verifying_key::{verify, VerifyingKey};
 
-/// Messages one forgery attempt grinds through, eight times the expected need at `ord(A) = 8`
+/// A forgery attempt tries this many messages, eight times the expected need at `ord(A) = 8`
 const GRIND_ATTEMPTS: u32 = 64;
 
 /// What this crate says about one case
@@ -100,7 +100,7 @@ fn low_order_forgeries() {
         for attempt in 0..GRIND_ATTEMPTS {
             let message = format!("pay attacker {attempt}").into_bytes();
 
-            // The bare verification equation, the order tests taken out.
+            // Check the bare equation without the order tests
             let k = challenge(&r_bytes, &key_bytes, &message);
             let expected_r =
                 EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &negated(&key), &s)

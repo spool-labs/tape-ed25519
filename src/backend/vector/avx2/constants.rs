@@ -1,6 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Identity points, multiples of p and basepoint tables for the AVX2 backend
 
-//! This module contains constants used by the AVX2 backend.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 use crate::backend::vector::packed_simd::u32x8;
 
@@ -9,7 +9,7 @@ use crate::backend::vector::avx2::field::FieldElement2625x4;
 
 use crate::window::NafLookupTable8;
 
-/// The identity element as an `ExtendedPoint`.
+/// The identity as an `ExtendedPoint`
 pub static EXTENDEDPOINT_IDENTITY: ExtendedPoint = ExtendedPoint(FieldElement2625x4([
     u32x8::new_const(0, 1, 0, 0, 1, 0, 0, 0),
     u32x8::splat_const::<0>(),
@@ -18,7 +18,7 @@ pub static EXTENDEDPOINT_IDENTITY: ExtendedPoint = ExtendedPoint(FieldElement262
     u32x8::splat_const::<0>(),
 ]));
 
-/// The identity element as a `CachedPoint`.
+/// The identity as a `CachedPoint`
 pub static CACHEDPOINT_IDENTITY: CachedPoint = CachedPoint(FieldElement2625x4([
     u32x8::new_const(121647, 121666, 0, 0, 243332, 67108845, 0, 33554431),
     u32x8::new_const(67108864, 0, 33554431, 0, 0, 67108863, 0, 33554431),
@@ -27,11 +27,7 @@ pub static CACHEDPOINT_IDENTITY: CachedPoint = CachedPoint(FieldElement2625x4([
     u32x8::new_const(67108863, 0, 33554431, 0, 0, 67108863, 0, 33554431),
 ]));
 
-/// Odd multiples `[B', 3B', ..., 127B']` of `B' = B * 2^128`, where `B` is the
-/// Ed25519 basepoint.
-///
-/// The encoding is projective, so these canonical limbs are a different
-/// representative of the same points than runtime conversion produces.
+/// Odd multiples B', 3B', ..., 127B' of B' = 2^128 B in projective form
 pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLookupTable8([
     CachedPoint(FieldElement2625x4([
         u32x8::new_const(
@@ -1129,10 +1125,7 @@ mod test {
     use crate::backend::serial::u64::field::FieldElement51;
     use crate::constants as curve_constants;
 
-    /// Assert that two `CachedPoint`s encode the same point.
-    ///
-    /// The encoding is projective, so this cross-multiplies by the `C` lanes
-    /// rather than comparing limbs.
+    /// Assert that two projective `CachedPoint`s agree after cross-multiplying by their C lanes
     fn assert_same_cached_point(s: &CachedPoint, r: &CachedPoint, i: usize) {
         let [sa, sb, sc, sd] = s.0.split();
         let [ra, rb, rc, rd] = r.0.split();
@@ -1162,10 +1155,7 @@ mod test {
     }
 }
 
-/// The low limbs of (2p, 2p, 2p, 2p), so that
-/// ```ascii,no_run
-/// (2p, 2p, 2p, 2p) = [P_TIMES_2_LO, P_TIMES_2_HI, P_TIMES_2_HI, P_TIMES_2_HI, P_TIMES_2_HI]
-/// ```
+/// The lowest limb pair of 2p in every lane
 pub static P_TIMES_2_LO: u32x8 = u32x8::new_const(
     67108845 << 1,
     67108845 << 1,
@@ -1177,10 +1167,7 @@ pub static P_TIMES_2_LO: u32x8 = u32x8::new_const(
     33554431 << 1,
 );
 
-/// The high limbs of (2p, 2p, 2p, 2p), so that
-/// ```ascii,no_run
-/// (2p, 2p, 2p, 2p) = [P_TIMES_2_LO, P_TIMES_2_HI, P_TIMES_2_HI, P_TIMES_2_HI, P_TIMES_2_HI]
-/// ```
+/// Each higher limb pair of 2p in every lane
 pub static P_TIMES_2_HI: u32x8 = u32x8::new_const(
     67108863 << 1,
     67108863 << 1,
@@ -1192,10 +1179,7 @@ pub static P_TIMES_2_HI: u32x8 = u32x8::new_const(
     33554431 << 1,
 );
 
-/// The low limbs of (16p, 16p, 16p, 16p), so that
-/// ```ascii,no_run
-/// (16p, 16p, 16p, 16p) = [P_TIMES_16_LO, P_TIMES_16_HI, P_TIMES_16_HI, P_TIMES_16_HI, P_TIMES_16_HI]
-/// ```
+/// The lowest limb pair of 16p in every lane
 pub static P_TIMES_16_LO: u32x8 = u32x8::new_const(
     67108845 << 4,
     67108845 << 4,
@@ -1207,10 +1191,7 @@ pub static P_TIMES_16_LO: u32x8 = u32x8::new_const(
     33554431 << 4,
 );
 
-/// The high limbs of (16p, 16p, 16p, 16p), so that
-/// ```ascii,no_run
-/// (16p, 16p, 16p, 16p) = [P_TIMES_16_LO, P_TIMES_16_HI, P_TIMES_16_HI, P_TIMES_16_HI, P_TIMES_16_HI]
-/// ```
+/// Each higher limb pair of 16p in every lane
 pub static P_TIMES_16_HI: u32x8 = u32x8::new_const(
     67108863 << 4,
     67108863 << 4,
@@ -1222,7 +1203,7 @@ pub static P_TIMES_16_HI: u32x8 = u32x8::new_const(
     33554431 << 4,
 );
 
-/// Odd multiples of the Ed25519 basepoint:
+/// Odd multiples B, 3B, ..., 127B of the Ed25519 basepoint
 pub static BASEPOINT_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLookupTable8([
     CachedPoint(FieldElement2625x4([
         u32x8::new_const(

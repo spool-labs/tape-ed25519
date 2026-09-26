@@ -24,7 +24,7 @@ pub struct TestCase {
     /// The encoded signature
     pub signature: [u8; 64],
 
-    /// Whether the pre-ZIP-215 rules accept it, which is what `verify_strict` applies
+    /// Whether the pre-ZIP-215 rules of `verify_strict` accept it
     pub is_valid_strict: bool,
 
     /// Whether the ZIP-215 rules accept it
@@ -69,16 +69,12 @@ pub fn non_canonical_field_encodings() -> Vec<[u8; 32]> {
 }
 
 /// All 25 non-canonical point encodings, the first 6 of them of low order
-///
-/// A point is encoded by its y coordinate and the sign of x, so an encoding is non-canonical
-/// either because y is encoded as `y + p`, or because both sign choices give the same x, which
-/// happens only at `x = 0`, that is `y = 1` or `y = -1`.
 pub fn non_canonical_point_encodings() -> Vec<[u8; 32]> {
     const SIGN_BIT: u8 = 128;
 
     let mut encodings = Vec::new();
 
-    // Canonical y with the sign bit set where x is zero.
+    // Canonical y with the sign bit set where x is zero
     encodings.push([
         1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 128,
@@ -88,7 +84,7 @@ pub fn non_canonical_point_encodings() -> Vec<[u8; 32]> {
         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
     ]);
 
-    // Not every field element is the y coordinate of a curve point, so decompression decides.
+    // Decompression decides which field elements are curve y coordinates
     for mut encoding in non_canonical_field_encodings() {
         if CompressedEdwardsY(encoding).decompress().is_some() {
             encodings.push(encoding);
@@ -109,10 +105,7 @@ pub fn non_canonical_point_encodings() -> Vec<[u8; 32]> {
     encodings
 }
 
-/// Every encoding of a point of order dividing 8, canonical and not
-///
-/// Each 8-torsion point has both a sign-bit-clear and a sign-bit-set encoding, so a blacklist
-/// holding only one of the two, or only the canonical encodings, leaves low-order keys reachable.
+/// Every canonical and non-canonical encoding of a point of order dividing 8
 pub fn low_order_encodings() -> Vec<[u8; 32]> {
     let mut encodings = Vec::new();
     for point in EIGHT_TORSION.iter() {
@@ -134,12 +127,7 @@ pub fn low_order_encodings() -> Vec<[u8; 32]> {
     encodings
 }
 
-/// Every pair of low-order `A` and `R` with `s = 0`
-///
-/// The verification equation is `[8][s]B = [8]R + [8][k]A`. With `R` and `A` of low order the
-/// right side is zero, and `s = 0` makes the left side zero, so ZIP-215 accepts all of them. The
-/// pre-ZIP-215 rules refuse a low-order `A` or `R` before the equation is reached, so none of
-/// these is valid there.
+/// Every pair of low-order `A` and `R` with `s = 0`, which ZIP-215 accepts and the strict rules refuse
 pub fn small_order_cases() -> Vec<TestCase> {
     let mut cases = Vec::new();
     let encodings = low_order_encodings();

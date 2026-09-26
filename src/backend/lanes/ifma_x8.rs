@@ -1,15 +1,9 @@
-// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause. See LICENSE.
+//! AVX-512 IFMA kernels for the eight-lane field arithmetic and the fused curve stage
 
-//! AVX-512 IFMA kernels for the lane-per-signature field layer.
-//!
-//! Bounds contract: `mul`, `square`, `sub` and `neg` return limbs below 2^52;
-//! `add` returns raw limb sums, below 2^53 for in-contract inputs. VPMADD52
-//! truncates its multiplicands to 52 bits, so `mul` and `square` carry-reduce
-//! their operands first and accept any limbs the portable path produces.
+// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
 #![allow(non_snake_case)]
-// Nightly and stable currently disagree on the requirement of unsafe blocks
-// when intrinsics are called inside `#[target_feature]` functions.
+// Toolchains differ on whether intrinsics inside target_feature functions need an unsafe block
 #![allow(unused_unsafe)]
 
 use core::arch::x86_64::{
@@ -20,17 +14,14 @@ use core::arch::x86_64::{
 
 use super::field_x8::FieldElementX8;
 
-// `avx512bw` is what the x8 SHA-512 gather byte-swaps with.
+// The eight-lane SHA-512 byte swap needs avx512bw
 cpufeatures::new!(cpuid_avx512ifma_x8, "avx512f", "avx512bw", "avx512ifma");
 
-/// Whether the running CPU supports the kernels in this module.
+/// Report whether the running CPU supports the kernels in this module
 #[inline]
 pub fn available() -> bool {
     cpuid_avx512ifma_x8::init().get()
 }
-
-// Small helpers, all compiled with the target feature so they inline into the
-// kernels below.
 
 tf!(
     fn splat(v: u64) -> __m512i {
@@ -94,9 +85,7 @@ tf!(
     }
 );
 
-// One carry pass: masks each limb to 51 bits, propagates carries upward, and
-// folds the top carry back with weight 19. Accepts arbitrary 64-bit limbs and
-// returns limbs below 2^52.
+// Mask each limb to 51 bits and fold the overflow upward, taking any 64-bit limbs to limbs below 2^52
 tf!(
     fn carry_reduce(x: [__m512i; 5]) -> [__m512i; 5] {
         unsafe {
@@ -120,7 +109,7 @@ tf!(
     }
 );
 
-// Kernels. Safety: the caller must have verified `available()`.
+// Every kernel below requires the caller to have checked `available()`
 
 #[target_feature(enable = "avx512ifma")]
 pub unsafe fn add_x8(a: &FieldElementX8, b: &FieldElementX8) -> FieldElementX8 {
@@ -137,9 +126,10 @@ pub unsafe fn add_x8(a: &FieldElementX8, b: &FieldElementX8) -> FieldElementX8 {
     }
 }
 
-/// Sixteen times the prime, limb-wise: the bias that keeps subtractions nonnegative.
-const P_TIMES_16_LO: u64 = 36028797018963664; // 16 * (2^51 - 19)
-const P_TIMES_16_HI: u64 = 36028797018963952; // 16 * (2^51 - 1)
+/// Low limb of sixteen times the prime, the bias that keeps subtractions nonnegative
+const P_TIMES_16_LO: u64 = 36028797018963664;
+/// Upper limbs of sixteen times the prime
+const P_TIMES_16_HI: u64 = 36028797018963952;
 
 #[target_feature(enable = "avx512ifma")]
 pub unsafe fn sub_x8(a: &FieldElementX8, b: &FieldElementX8) -> FieldElementX8 {
@@ -179,8 +169,7 @@ unsafe fn mul_waves(x: [__m512i; 5], y: [__m512i; 5]) -> [__m512i; 5] {
     unsafe { carry_reduce(mul_waves_raw_emit!(x, y)) }
 }
 
-/// The multiplication waves without the trailing carry pass: for operands below
-/// 2^52 the result limbs are below 18 * 2^52 < 2^57.
+/// Multiply without the final reduction, taking limbs below 2^52 to limbs below 2^57
 #[target_feature(enable = "avx512ifma")]
 unsafe fn mul_waves_raw(x: [__m512i; 5], y: [__m512i; 5]) -> [__m512i; 5] {
     mul_waves_raw_emit!(x, y)
@@ -200,8 +189,7 @@ unsafe fn square_waves(x: [__m512i; 5]) -> [__m512i; 5] {
     unsafe { carry_reduce(square_waves_raw_emit!(x)) }
 }
 
-/// The squaring waves without the trailing carry pass; same bound contract
-/// as `mul_waves_raw`.
+/// Square without the final reduction, with the same bounds as `mul_waves_raw`
 #[target_feature(enable = "avx512ifma")]
 unsafe fn square_waves_raw(x: [__m512i; 5]) -> [__m512i; 5] {
     square_waves_raw_emit!(x)
@@ -230,7 +218,7 @@ pub unsafe fn square2_x8(a: &FieldElementX8) -> FieldElementX8 {
     }
 }
 
-/// `k` successive squarings without leaving the vector domain.
+/// Square `k` times in vector registers
 #[target_feature(enable = "avx512ifma")]
 pub unsafe fn pow2k_x8(a: &FieldElementX8, k: u32) -> FieldElementX8 {
     debug_assert!(k > 0);
@@ -243,11 +231,7 @@ pub unsafe fn pow2k_x8(a: &FieldElementX8, k: u32) -> FieldElementX8 {
     }
 }
 
-// Fused group verification: the whole curve portion of a lane group runs inside
-// this one target-feature region, so field values stay in ZMM registers.
-// Additions carry-reduce their outputs, so every multiplication operand is
-// in-contract for VPMADD52.
-
+/// The curve stage of one lane group in one target-feature region so field values stay in registers
 pub mod fused {
     use core::arch::x86_64::{__m512i, _mm512_loadu_si512, _mm512_srli_epi64};
 
@@ -319,7 +303,7 @@ pub mod fused {
         }
     );
 
-    // The serial `pow22501` chain, register-resident.
+    // This chain computes the same power as the serial `pow22501`
     tf!(
         fn fpow22501(a: V) -> V {
             unsafe {
@@ -357,9 +341,7 @@ pub mod fused {
         }
     );
 
-    // Raw products carry limbs below 18*2^52 < 2^57 and are carry-reduced once,
-    // at the next multiply input. The 64p, 128p and 256p biases cover a raw
-    // product, a sum of two, and a biased combination; limbs stay below 2^60.
+    // Raw products reduce once at the next multiply input and these biases keep every limb below 2^60
 
     const P64_LO: u64 = 64 * ((1 << 51) - 19);
     const P64_HI: u64 = 64 * ((1 << 51) - 1);
@@ -387,13 +369,12 @@ pub mod fused {
     );
 
     tf!(
-        /// The canonical representative: limbs below 2^51 holding a value below p,
-        /// so two elements agree mod p exactly when their limbs do.
+        /// Reduce to the canonical representative so equal elements have equal limbs
         fn fcanon(a: V) -> V {
             unsafe {
                 let mask = splat((1 << 51) - 1);
                 let l = carry_reduce(a);
-                // The carry out of h + 19 is one exactly when h >= p.
+                // The overflow out of h + 19 is one exactly when h is at least p
                 let mut q = shr!(add(l[0], splat(19)), 51);
                 q = shr!(add(l[1], q), 51);
                 q = shr!(add(l[2], q), 51);
@@ -416,7 +397,7 @@ pub mod fused {
     );
 
     tf!(
-        /// Lanes where two canonical elements are equal.
+        /// Return the mask of lanes where two canonical elements are equal
         fn fcanon_eq(a: V, b: V) -> u8 {
             unsafe {
                 use core::arch::x86_64::_mm512_cmpeq_epi64_mask;
@@ -430,14 +411,14 @@ pub mod fused {
     );
 
     tf!(
-        /// Lanes that are zero mod p, for limbs of any magnitude.
+        /// Return the mask of lanes that are zero mod p for limbs of any size
         fn fis_zero(a: V) -> u8 {
             unsafe { fcanon_eq(fcanon(a), [splat(0); 5]) }
         }
     );
 
     tf!(
-        /// Lane-wise select: `b` where the mask is set, `a` elsewhere.
+        /// Select `b` in lanes where the mask is set and `a` in the others
         fn fblend(k: u8, a: V, b: V) -> V {
             unsafe {
                 use core::arch::x86_64::_mm512_mask_blend_epi64;
@@ -452,7 +433,6 @@ pub mod fused {
         }
     );
 
-    // Plain limb sums, no reduction.
     tf!(
         fn add_raw(a: V, b: V) -> V {
             unsafe {
@@ -467,8 +447,7 @@ pub mod fused {
         }
     );
 
-    // a + bias - b without reduction; the caller picks a bias whose limbs
-    // dominate b's.
+    // The caller picks a bias whose limbs exceed the limbs of b
     tf!(
         fn sub_raw_biased(a: V, b: V, lo: u64, hi: u64) -> V {
             unsafe {
@@ -539,59 +518,55 @@ pub mod fused {
     );
 
     tf!(
-        /// Mixed readdition: `p` fields may be raw products (< 2^57), `q` must be
-        /// reduced (< 2^52), outputs are raw combinations (< 2^58.2).
+        /// Add a cached point with limbs below 2^52 to a point with raw limbs below 2^57
         fn readd(p: &ExtV, q: &NielsV) -> ComplV {
             unsafe {
-                // Multiply inputs are reduced here, once each.
-                let ypx = freduce(add_raw(p.y, p.x)); // < 2^58 before, < 2^52 after
+                let ypx = freduce(add_raw(p.y, p.x));
                 let ymx = freduce(sub_raw_biased(p.y, p.x, P64_LO, P64_HI));
                 let t = freduce(p.t);
                 let z = freduce(p.z);
-                let pp = fmul_raw(ypx, q.ypx); // < 2^56.2
+                let pp = fmul_raw(ypx, q.ypx);
                 let mm = fmul_raw(ymx, q.ymx);
                 let tt2d = fmul_raw(t, q.t2d);
                 let zz = fmul_raw(z, q.z);
-                let zz2 = add_raw(zz, zz); // < 2^57.2
+                let zz2 = add_raw(zz, zz);
                 ComplV {
-                    x: sub_raw_biased(pp, mm, P64_LO, P64_HI),    // < 2^57.1
-                    y: add_raw(pp, mm),                           // < 2^57.2
-                    z: add_raw(zz2, tt2d),                        // < 2^57.8
-                    t: sub_raw_biased(zz2, tt2d, P64_LO, P64_HI), // < 2^58.2
+                    x: sub_raw_biased(pp, mm, P64_LO, P64_HI),
+                    y: add_raw(pp, mm),
+                    z: add_raw(zz2, tt2d),
+                    t: sub_raw_biased(zz2, tt2d, P64_LO, P64_HI),
                 }
             }
         }
     );
 
     tf!(
-        /// Projective doubling: `p` fields may be raw (< 2^57), outputs are raw
-        /// combinations (< 2^59.6).
+        /// Double a projective point with raw limbs below 2^57
         fn double_proj(p: &ProjV) -> ComplV {
             unsafe {
                 let x = freduce(p.x);
                 let y = freduce(p.y);
                 let z = freduce(p.z);
                 let xpy = freduce(add_raw(p.x, p.y));
-                let xx = fsquare_raw(x); // < 2^56.2
+                let xx = fsquare_raw(x);
                 let yy = fsquare_raw(y);
                 let zz = fsquare_raw(z);
                 let xpy_sq = fsquare_raw(xpy);
-                let zz2 = add_raw(zz, zz); // < 2^57.2
-                let yy_plus_xx = add_raw(yy, xx); // < 2^57.2
-                let yy_minus_xx = sub_raw_biased(yy, xx, P64_LO, P64_HI); // < 2^57.1
+                let zz2 = add_raw(zz, zz);
+                let yy_plus_xx = add_raw(yy, xx);
+                let yy_minus_xx = sub_raw_biased(yy, xx, P64_LO, P64_HI);
                 ComplV {
-                    x: sub_raw_biased(xpy_sq, yy_plus_xx, P128_LO, P128_HI), // < 2^58.4
+                    x: sub_raw_biased(xpy_sq, yy_plus_xx, P128_LO, P128_HI),
                     y: yy_plus_xx,
                     z: yy_minus_xx,
-                    t: sub_raw_biased(zz2, yy_minus_xx, P256_LO, P256_HI), // < 2^59.4
+                    t: sub_raw_biased(zz2, yy_minus_xx, P256_LO, P256_HI),
                 }
             }
         }
     );
 
     tf!(
-        /// Completed-to-projective conversion: inputs may be any raw combination
-        /// (< 2^60), each reduced once here, and outputs are raw products.
+        /// Convert a completed point with raw limbs below 2^60 to projective form
         fn compl_to_proj(p: &ComplV) -> ProjV {
             unsafe {
                 let x = freduce(p.x);
@@ -608,7 +583,7 @@ pub mod fused {
     );
 
     tf!(
-        /// Completed-to-extended conversion, with the same bounds as `compl_to_proj`.
+        /// Convert a completed point to extended form with the same bounds as `compl_to_proj`
         fn compl_to_ext(p: &ComplV) -> ExtV {
             unsafe {
                 let x = freduce(p.x);
@@ -626,8 +601,7 @@ pub mod fused {
     );
 
     tf!(
-        /// The square-root chain of a decompression: (y, u, v, r) with r the
-        /// candidate root of u / v
+        /// Run the square-root chain of a decompression and return y, u, v and the candidate root of u / v
         fn sqrt_chain(encodings: &[[u8; 32]; LANES]) -> [V; 4] {
             unsafe {
                 let y_fe = FieldElementX8::from_lanes(&core::array::from_fn(|l| {
@@ -636,10 +610,10 @@ pub mod fused {
                 let y = load(&y_fe);
                 let one = load(&FieldElementX8::ONE);
                 let yy = fsquare(y);
-                let u = fsub(yy, one); // y^2 - 1
-                let v = fadd(fmul(yy, load(&FieldElementX8::splat(EDWARDS_D))), one); // dy^2 + 1
+                let u = fsub(yy, one);
+                let v = fadd(fmul(yy, load(&FieldElementX8::splat(EDWARDS_D))), one);
 
-                // sqrt_ratio_i, fused: r = (u v^3)(u v^7)^((p-5)/8), check = v r^2.
+                // This step computes r = (u v^3)(u v^7)^((p-5)/8) as in sqrt_ratio_i
                 let v3 = fmul(fsquare(v), v);
                 let v7 = fmul(fsquare(v3), v);
                 let r = fmul(fmul(u, v3), fpow_p58(fmul(u, v7)));
@@ -649,7 +623,7 @@ pub mod fused {
     );
 
     tf!(
-        /// Two square-root chains advanced together, so their latencies overlap.
+        /// Run two square-root chains together so their latencies overlap
         fn sqrt_chain_x2(a: &[[u8; 32]; LANES], b: &[[u8; 32]; LANES]) -> [[V; 4]; 2] {
             unsafe {
                 let ys = [a, b].map(|encodings| {
@@ -694,7 +668,7 @@ pub mod fused {
     );
 
     tf!(
-        /// `fpow22501` on two elements in lockstep.
+        /// Run `fpow22501` on two elements in lockstep
         fn fpow22501_x2(a: [V; 2]) -> [V; 2] {
             unsafe {
                 let t0 = fpow2k_x2(a, 1);
@@ -732,8 +706,7 @@ pub mod fused {
     );
 
     tf!(
-        /// Finish a decompression from its chain: pick the root, apply the sign,
-        /// park invalid lanes at the identity
+        /// Finish a decompression by picking the root, applying the sign and setting invalid lanes to the identity
         fn finish_decompress(chain: [V; 4], encodings: &[[u8; 32]; LANES]) -> (ExtV, u8) {
             unsafe {
                 use core::arch::x86_64::_mm512_test_epi64_mask;
@@ -755,7 +728,7 @@ pub mod fused {
                 let was_square = correct_sign | flipped_sign;
 
                 let mut x = fblend(take_prime, r, fmul(r, sqrt_m1));
-                // A canonical encoding is negative when its low bit is set.
+                // A canonical encoding is negative when its low bit is set
                 let x_negative = _mm512_test_epi64_mask(fcanon(x)[0], splat(1));
                 x = fblend(x_negative, x, fsub(zero, x));
 
@@ -765,7 +738,6 @@ pub mod fused {
                 }
                 x = fblend(sign_bits, x, fsub(zero, x));
 
-                // Invalid lanes park at the identity.
                 let out = ExtV {
                     x: fblend(was_square, zero, x),
                     y: fblend(was_square, one, y),
@@ -778,14 +750,13 @@ pub mod fused {
         }
     );
 
-    /// Decompress eight encodings as `decompress_x8` does, with the square-root
-    /// power chain fused and every lane fixup a mask over canonical limbs.
+    /// Decompress eight encodings as `decompress_x8` does with the chain in registers
     #[target_feature(enable = "avx512ifma")]
     unsafe fn decompress_fused(encodings: &[[u8; 32]; LANES]) -> (ExtV, u8) {
         unsafe { finish_decompress(sqrt_chain(encodings), encodings) }
     }
 
-    /// Two decompressions with their chains interleaved.
+    /// Decompress two sets of encodings with their chains interleaved
     #[target_feature(enable = "avx512ifma")]
     unsafe fn decompress_fused_x2(a: &[[u8; 32]; LANES], b: &[[u8; 32]; LANES]) -> [(ExtV, u8); 2] {
         unsafe {
@@ -795,7 +766,7 @@ pub mod fused {
     }
 
     tf!(
-        /// Store a raw extended point as a reduced cached-point table entry.
+        /// Store a raw extended point as a reduced cached-point table entry
         fn to_niels_mem(e: &ExtV, d2: V) -> ProjectiveNielsX8 {
             unsafe {
                 ProjectiveNielsX8 {
@@ -808,7 +779,7 @@ pub mod fused {
         }
     );
 
-    /// Build the per-lane `[P, 2P, ..., 8P]` table, stored to memory for selection.
+    /// Build the per-lane table of `P` through `8P` in memory
     #[target_feature(enable = "avx512ifma")]
     unsafe fn build_table(p: &ExtV) -> LookupTableX8 {
         unsafe {
@@ -824,7 +795,7 @@ pub mod fused {
         }
     }
 
-    /// Two tables built together, so the two chains of additions overlap.
+    /// Build two tables together so their chains of additions overlap
     #[target_feature(enable = "avx512ifma")]
     unsafe fn build_table_x2(p: &ExtV, q: &ExtV) -> [LookupTableX8; 2] {
         unsafe {
@@ -844,11 +815,7 @@ pub mod fused {
         }
     }
 
-    // Vectorized per-lane table selection: the magnitude pick is a three-level
-    // blend tree keyed by the index bits, and sign and zero handling are single
-    // masked blends, so the whole select stays in vector registers.
-
-    /// Eight-to-one lane-wise multiplexer over preloaded rows.
+    /// Pick one of eight rows per lane with a three-level blend tree on the index bits
     #[target_feature(enable = "avx512ifma")]
     #[inline]
     unsafe fn mux8(rows: [__m512i; 8], m0: u8, m1: u8, m2: u8) -> __m512i {
@@ -886,15 +853,13 @@ pub mod fused {
         }};
     }
 
-    /// Select, per lane, the cached point for a signed radix-16 digit in
-    /// `[-8, 8]`, entirely in vector registers.
+    /// Select per lane the cached point for a signed radix-16 digit in -8..=8
     #[target_feature(enable = "avx512ifma")]
     #[inline]
     unsafe fn select_v(table: &LookupTableX8, digits: &[i8; LANES]) -> NielsV {
         unsafe {
             use core::arch::x86_64::_mm512_mask_blend_epi64;
 
-            // Per-lane masks from the digits.
             let mut m0: u8 = 0;
             let mut m1: u8 = 0;
             let mut m2: u8 = 0;
@@ -925,7 +890,7 @@ pub mod fused {
             let z = mux_coord!(table, Z, m0, m1, m2);
             let t2d = mux_coord!(table, T2d, m0, m1, m2);
 
-            // Negative digits: swap Y+X with Y-X and negate 2dT, lane-masked.
+            // A negative digit swaps Y+X with Y-X and negates 2dT
             let zero_v = [splat(0); 5];
             let neg_t2d = fsub(zero_v, t2d);
             let mut out_ypx = [splat(0); 5];
@@ -937,7 +902,7 @@ pub mod fused {
                 out_t2d[i] = _mm512_mask_blend_epi64(sign_mask, t2d[i], neg_t2d[i]);
             }
 
-            // Zero digits: the identity cached point (1, 1, 1, 0).
+            // A zero digit selects the identity cached point (1, 1, 1, 0)
             let one_limb0 = splat(1);
             let mut out = NielsV {
                 ypx: out_ypx,
@@ -967,8 +932,7 @@ pub mod fused {
     }
 
     tf!(
-        /// Affine mixed readdition, with `q.z` one and the same bounds as `readd`.
-        /// `p.z` is never multiplied, so it is only doubled raw.
+        /// Add an affine cached point with the same bounds as `readd`
         fn readd_affine(p: &ExtV, q: &AffNielsV) -> ComplV {
             unsafe {
                 let ypx = freduce(add_raw(p.y, p.x));
@@ -977,18 +941,18 @@ pub mod fused {
                 let pp = fmul_raw(ypx, q.ypx);
                 let mm = fmul_raw(ymx, q.ymx);
                 let tt2d = fmul_raw(t, q.t2d);
-                let z2 = add_raw(p.z, p.z); // < 2^58
+                let z2 = add_raw(p.z, p.z);
                 ComplV {
                     x: sub_raw_biased(pp, mm, P64_LO, P64_HI),
                     y: add_raw(pp, mm),
-                    z: add_raw(z2, tt2d),                        // < 2^58.3
-                    t: sub_raw_biased(z2, tt2d, P64_LO, P64_HI), // < 2^58.6
+                    z: add_raw(z2, tt2d),
+                    t: sub_raw_biased(z2, tt2d, P64_LO, P64_HI),
                 }
             }
         }
     );
 
-    /// Gather, per lane, the joint table entry for a digit pair.
+    /// Gather per lane the joint table entry for a digit pair
     #[target_feature(enable = "avx512ifma")]
     #[inline]
     unsafe fn select_joint(table: &JointTable, index: &[u64; LANES]) -> AffNielsV {
@@ -1012,7 +976,7 @@ pub mod fused {
         }
     }
 
-    /// `select_v` for tables affine in every lane: `Z` is never materialized.
+    /// Select like `select_v` from a table whose entries are all affine
     #[target_feature(enable = "avx512ifma")]
     #[inline]
     unsafe fn select_v_affine(table: &LookupTableX8, digits: &[i8; LANES]) -> AffNielsV {
@@ -1061,7 +1025,7 @@ pub mod fused {
                 out.t2d[i] = _mm512_mask_blend_epi64(sign_mask, t2d[i], neg_t2d[i]);
             }
 
-            // Zero digits: the affine identity (1, 1, 0).
+            // A zero digit selects the affine identity (1, 1, 0)
             let one_limb0 = splat(1);
             out.ypx[0] = _mm512_mask_blend_epi64(zero_mask, out.ypx[0], one_limb0);
             out.ymx[0] = _mm512_mask_blend_epi64(zero_mask, out.ymx[0], one_limb0);
@@ -1076,12 +1040,7 @@ pub mod fused {
         }
     }
 
-    /// The complete curve stage for one group: decompress, tables, the four-term
-    /// lockstep Horner loop, cofactor doublings and identity test.
-    ///
-    /// # Safety
-    ///
-    /// Callers must have verified [`available`].
+    /// Run the curve stage for one group, which requires the caller to have checked `available`
     #[target_feature(enable = "avx512ifma")]
     pub unsafe fn verify_curve_x8(
         a_encodings: &[[u8; 32]; LANES],
@@ -1093,8 +1052,7 @@ pub mod fused {
         unsafe {
             let mut alive = *alive_in;
 
-            // A prepared table carries known-valid affine `A` multiples;
-            // otherwise decompress `A` and build its table here.
+            // A prepared table holds affine multiples of an already valid `A`
             let owned_a: LookupTableX8;
             let table_r: LookupTableX8;
             let (table_a, affine_a): (&LookupTableX8, bool) = match prepared_a {
@@ -1154,7 +1112,6 @@ pub mod fused {
                 last = Some(completed);
             }
 
-            // Three cofactor doublings.
             let e_final = match last {
                 Some(ref c) => compl_to_ext(c),
                 None => load_ext(&ExtendedPointX8::IDENTITY),
@@ -1171,8 +1128,7 @@ pub mod fused {
             let c = double_proj(&p);
             let checked = compl_to_ext(&c);
 
-            // Identity per lane: X == 0 and Y == Z. `checked` fields are raw
-            // (< 2^57); the difference needs the wider bias before reduction.
+            // A lane holds the identity when X is zero and Y equals Z
             let x_zero = fis_zero(checked.x);
             let yz_zero = fis_zero(sub_raw_biased(checked.y, checked.z, P64_LO, P64_HI));
 
@@ -1196,11 +1152,11 @@ pub mod fused {
             let cases: [[u64; 5]; LANES] = [
                 [0, 0, 0, 0, 0],
                 [1, 0, 0, 0, 0],
-                [LOW - 19, LOW, LOW, LOW, LOW], // p - 1
-                [LOW - 18, LOW, LOW, LOW, LOW], // p
-                [LOW - 17, LOW, LOW, LOW, LOW], // p + 1
-                [LOW, LOW, LOW, LOW, LOW],      // 2^255 - 1
-                [HI, HI, HI, HI, HI],           // unreduced limbs
+                [LOW - 19, LOW, LOW, LOW, LOW],
+                [LOW - 18, LOW, LOW, LOW, LOW],
+                [LOW - 17, LOW, LOW, LOW, LOW],
+                [LOW, LOW, LOW, LOW, LOW],
+                [HI, HI, HI, HI, HI],
                 [LOW - 18, LOW, LOW, LOW, LOW - 1],
             ];
 
@@ -1251,7 +1207,7 @@ mod test {
         let b_lanes = test_elements(9);
         let a = FieldElementX8::from_lanes(&a_lanes);
         let b = FieldElementX8::from_lanes(&b_lanes);
-        // Unreduced operands: limb sums near 2^53.
+        // Limb sums near 2^53 exercise unreduced operands
         let wide = {
             let mut w = a;
             for i in 0..5 {

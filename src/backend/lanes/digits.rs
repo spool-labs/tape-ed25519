@@ -1,31 +1,31 @@
-// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause. See LICENSE.
+//! Digit schedules for the radix-16 rounds of the lane verifier
 
-//! Digit schedules for the radix-16 rounds of the lane verifier.
+// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
 use crate::backend::lanes::field_x8::LANES;
 use crate::scalar::Scalar;
 
-/// Radix-16 positions a 129-bit scalar can occupy.
+/// A 129-bit scalar fills this many radix-16 positions
 pub const HEEA_DIGITS: usize = 33;
 
-/// Radix-16 positions in each half of tau s.
+/// Each half of `tau s` fills this many radix-16 positions
 pub const JOINT_DIGITS: usize = 32;
 
-/// Bit where the high half of tau s starts.
+/// The high half of `tau s` starts at this bit
 const JOINT_SPLIT: usize = 128;
 
-/// Bits per radix-16 digit.
+/// Bits in one radix-16 digit
 const WINDOW: usize = 4;
 
-/// The per-lane radix-16 digit schedules of the HEEA-transformed verification equation.
+/// Per-lane radix-16 digit schedules of the HEEA verification equation
 pub struct GroupDigits {
-    /// Joint fixed-base table index per lane, one row per position.
+    /// Joint fixed-base table index per lane, one row per position
     pub b: [[u64; LANES]; HEEA_DIGITS],
-    /// Digits applied to A, with the HEEA sign folded in.
+    /// Digits for A with the HEEA sign folded in
     pub a: [[i8; HEEA_DIGITS]; LANES],
-    /// Digits applied to R.
+    /// Digits for R
     pub r: [[i8; HEEA_DIGITS]; LANES],
-    /// Highest position with any nonzero digit.
+    /// Highest position that holds a nonzero digit
     pub start: usize,
 }
 
@@ -38,14 +38,14 @@ pub fn signed_digits(scalar: &Scalar) -> [i8; HEEA_DIGITS] {
     out
 }
 
-/// Negate a schedule digit by digit, which keeps every digit in -8..=8.
+/// Negate a schedule digit by digit, which keeps every digit in -8..=8
 pub fn negate(digits: &mut [i8; HEEA_DIGITS]) {
     for d in digits.iter_mut() {
         *d = -*d;
     }
 }
 
-/// Radix-16 digits of tau s as joint table indices, low half in the low four bits
+/// Radix-16 digits of `tau s` as joint table indices, with the low half in the low four bits
 pub fn joint_digits(bytes: &[u8; 32]) -> [u8; JOINT_DIGITS] {
     let nibble = |bit: usize| (bytes[bit / 8] >> (bit % 8)) & 15;
     let mut out = [0u8; JOINT_DIGITS];

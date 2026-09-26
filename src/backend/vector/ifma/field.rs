@@ -1,8 +1,8 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Four field elements per vector in radix 2^51 on the AVX-512 IFMA backend
 
-// Nightly and stable currently disagree on the requirement of unsafe blocks
-// when `unsafe_target_feature` gets used.
-// See: https://github.com/rust-lang/rust/issues/132856
+// Vendored from curve25519-dalek, BSD-3-Clause
+
+// Nightly and stable disagree on whether intrinsics inside unsafe_target_feature need unsafe blocks
 #![allow(unused_unsafe)]
 #![allow(non_snake_case)]
 
@@ -13,7 +13,7 @@ use crate::backend::serial::u64::field::FieldElement51;
 
 use curve25519_dalek_derive::unsafe_target_feature;
 
-/// A wrapper around `vpmadd52luq` that works on `u64x4`.
+/// Run `vpmadd52luq` on `u64x4` values
 #[unsafe_target_feature("avx512ifma,avx512vl")]
 #[inline]
 unsafe fn madd52lo(z: u64x4, x: u64x4, y: u64x4) -> u64x4 {
@@ -21,7 +21,7 @@ unsafe fn madd52lo(z: u64x4, x: u64x4, y: u64x4) -> u64x4 {
     _mm256_madd52lo_epu64(z.into(), x.into(), y.into()).into()
 }
 
-/// A wrapper around `vpmadd52huq` that works on `u64x4`.
+/// Run `vpmadd52huq` on `u64x4` values
 #[unsafe_target_feature("avx512ifma,avx512vl")]
 #[inline]
 unsafe fn madd52hi(z: u64x4, x: u64x4, y: u64x4) -> u64x4 {
@@ -29,11 +29,11 @@ unsafe fn madd52hi(z: u64x4, x: u64x4, y: u64x4) -> u64x4 {
     _mm256_madd52hi_epu64(z.into(), x.into(), y.into()).into()
 }
 
-/// A vector of four field elements in radix 2^51, with unreduced coefficients.
+/// Four field elements in radix 2^51 with unreduced limbs
 #[derive(Clone, Copy, Debug)]
 pub struct F51x4Unreduced(pub [u64x4; 5]);
 
-/// A vector of four field elements in radix 2^51, with reduced coefficients.
+/// Four field elements in radix 2^51 with reduced limbs
 #[derive(Clone, Copy, Debug)]
 pub struct F51x4Reduced(pub [u64x4; 5]);
 
@@ -268,7 +268,7 @@ impl F51x4Reduced {
         unsafe {
             let x = &self.0;
 
-            // Represent values with coeff. 2
+            // Accumulators for terms with coefficient 2
             let mut z0_2 = u64x4::splat(0);
             let mut z1_2 = u64x4::splat(0);
             let mut z2_2 = u64x4::splat(0);
@@ -279,7 +279,7 @@ impl F51x4Reduced {
             let mut z7_2 = u64x4::splat(0);
             let mut z9_2 = u64x4::splat(0);
 
-            // Represent values with coeff. 4
+            // Accumulators for terms with coefficient 4
             let mut z2_4 = u64x4::splat(0);
             let mut z3_4 = u64x4::splat(0);
             let mut z4_4 = u64x4::splat(0);
@@ -393,7 +393,6 @@ impl From<F51x4Unreduced> for F51x4Reduced {
         let mask = u64x4::splat((1 << 51) - 1);
         let r19 = u64x4::splat(19);
 
-        // Compute carryouts in parallel
         let c0 = x.0[0].shr::<51>();
         let c1 = x.0[1].shr::<51>();
         let c2 = x.0[2].shr::<51>();
@@ -453,7 +452,6 @@ impl Mul<(u32, u32, u32, u32)> for &F51x4Reduced {
             let mut z4_2 = u64x4::splat(0);
             let mut z5_2 = u64x4::splat(0);
 
-            // Wave 0
             z4_2 = madd52hi(z4_2, y, x[3]);
             z5_2 = madd52hi(z5_2, y, x[4]);
             z4_1 = madd52lo(z4_1, y, x[4]);
@@ -463,7 +461,6 @@ impl Mul<(u32, u32, u32, u32)> for &F51x4Reduced {
             z1_1 = madd52lo(z1_1, y, x[1]);
             z3_2 = madd52hi(z3_2, y, x[2]);
 
-            // Wave 2
             z2_2 = madd52hi(z2_2, y, x[1]);
             z1_2 = madd52hi(z1_2, y, x[0]);
             z0_1 = madd52lo(z0_1, z5_2 + z5_2, r19);
@@ -485,11 +482,10 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
     #[inline]
     fn mul(self, rhs: &F51x4Reduced) -> F51x4Unreduced {
         unsafe {
-            // Inputs
             let x = &self.0;
             let y = &rhs.0;
 
-            // Accumulators for terms with coeff 1
+            // Accumulators for terms with coefficient 1
             let mut z0_1 = u64x4::splat(0);
             let mut z1_1 = u64x4::splat(0);
             let mut z2_1 = u64x4::splat(0);
@@ -500,7 +496,7 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             let mut z7_1 = u64x4::splat(0);
             let mut z8_1 = u64x4::splat(0);
 
-            // Accumulators for terms with coeff 2
+            // Accumulators for terms with coefficient 2
             let mut z0_2 = u64x4::splat(0);
             let mut z1_2 = u64x4::splat(0);
             let mut z2_2 = u64x4::splat(0);
@@ -512,12 +508,7 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             let mut z8_2 = u64x4::splat(0);
             let mut z9_2 = u64x4::splat(0);
 
-            // LLVM doesn't seem to do much work reordering IFMA
-            // instructions, so try to organize them into "waves" of 8
-            // independent operations (4c latency, 0.5 c throughput
-            // means 8 in flight)
-
-            // Wave 0
+            // Multiply-adds come in waves of eight independent operations since LLVM keeps their order
             z4_1 = madd52lo(z4_1, x[2], y[2]);
             z5_2 = madd52hi(z5_2, x[2], y[2]);
             z5_1 = madd52lo(z5_1, x[4], y[1]);
@@ -527,7 +518,6 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             z7_1 = madd52lo(z7_1, x[4], y[3]);
             z8_2 = madd52hi(z8_2, x[4], y[3]);
 
-            // Wave 1
             z4_1 = madd52lo(z4_1, x[3], y[1]);
             z5_2 = madd52hi(z5_2, x[3], y[1]);
             z5_1 = madd52lo(z5_1, x[3], y[2]);
@@ -537,7 +527,6 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             z7_1 = madd52lo(z7_1, x[3], y[4]);
             z8_2 = madd52hi(z8_2, x[3], y[4]);
 
-            // Wave 2
             z8_1 = madd52lo(z8_1, x[4], y[4]);
             z9_2 = madd52hi(z9_2, x[4], y[4]);
             z4_1 = madd52lo(z4_1, x[4], y[0]);
@@ -550,7 +539,6 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             let z8 = z8_1 + z8_2 + z8_2;
             let z9 = z9_2 + z9_2;
 
-            // Wave 3
             z3_1 = madd52lo(z3_1, x[3], y[0]);
             z4_2 = madd52hi(z4_2, x[3], y[0]);
             z4_1 = madd52lo(z4_1, x[1], y[3]);
@@ -563,7 +551,6 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             let z6 = z6_1 + z6_2 + z6_2;
             let z7 = z7_1 + z7_2 + z7_2;
 
-            // Wave 4
             z3_1 = madd52lo(z3_1, x[2], y[1]);
             z4_2 = madd52hi(z4_2, x[2], y[1]);
             z4_1 = madd52lo(z4_1, x[0], y[4]);
@@ -575,7 +562,6 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
 
             let z5 = z5_1 + z5_2 + z5_2;
 
-            // Wave 5
             z3_1 = madd52lo(z3_1, x[1], y[2]);
             z4_2 = madd52hi(z4_2, x[1], y[2]);
             z0_1 = madd52lo(z0_1, x[0], y[0]);
@@ -589,7 +575,6 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             let mut t1 = u64x4::splat(0);
             let r19 = u64x4::splat(19);
 
-            // Wave 6
             t0 = madd52hi(t0, r19, z9);
             t1 = madd52lo(t1, r19, z9.shr::<52>());
             z3_1 = madd52lo(z3_1, x[0], y[3]);
@@ -599,7 +584,6 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             z3_2 = madd52lo(z3_2, r19, z7.shr::<52>());
             z0_1 = madd52lo(z0_1, r19, z5);
 
-            // Wave 7
             z4_1 = madd52lo(z4_1, r19, z9);
             z1_1 = madd52lo(z1_1, r19, z6);
             z0_2 = madd52lo(z0_2, r19, t0 + t1);
@@ -609,7 +593,6 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
             z2_2 = madd52hi(z2_2, r19, z6);
             z3_2 = madd52hi(z3_2, r19, z7);
 
-            // Wave 8
             z3_1 = madd52lo(z3_1, r19, z8);
             z4_2 = madd52lo(z4_2, r19, z8.shr::<52>());
 
@@ -657,7 +640,7 @@ mod test {
     fn new_split_round_trip_on_unreduced_input() {
         // Invert a small field element to get a big one
         let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-        // ... but now multiply it by 16 without reducing coeffs
+        // Scale it by 16 without reducing the limbs
         let a16 = FieldElement51([
             a.0[0] << 4,
             a.0[1] << 4,
@@ -678,7 +661,7 @@ mod test {
     fn test_reduction() {
         // Invert a small field element to get a big one
         let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-        // ... but now multiply it by 128 without reducing coeffs
+        // Scale it by 16 without reducing the limbs
         let abig = FieldElement51([
             a.0[0] << 4,
             a.0[1] << 4,

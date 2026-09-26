@@ -1,6 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! The AVX-512 IFMA half of the vectorized strategy, built on the two VPMADD52 instructions
 
-//! The AVX-512 IFMA half of the vectorized strategy, on the two VPMADD52 instructions
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #[allow(missing_docs)]
 pub mod field;

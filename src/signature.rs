@@ -5,13 +5,10 @@ use crate::error::Error;
 /// Bytes in an encoded signature
 pub const SIGNATURE_LENGTH: usize = 64;
 
-/// Bytes in each half of one
+/// Bytes in each half of a signature
 pub const HALF_LENGTH: usize = SIGNATURE_LENGTH / 2;
 
-/// An Ed25519 signature as it arrived
-///
-/// Neither half is decoded here. `R` is decompressed and `s` is range-checked by the verifier,
-/// which is where a bad encoding turns into a refusal.
+/// An Ed25519 signature with both halves still encoded
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Signature {
     r: [u8; HALF_LENGTH],

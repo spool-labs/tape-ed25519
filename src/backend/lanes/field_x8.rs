@@ -1,4 +1,6 @@
-// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause. See LICENSE.
+//! Eight field elements side by side, one per signature lane
+
+// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -7,26 +9,22 @@ use crate::backend::serial::u64::field::FieldElement51;
 #[cfg(curve25519_backend = "simd")]
 use super::ifma_x8;
 
-/// Whether the AVX-512 IFMA kernels should be used: a cached CPUID check.
+/// Report whether this host runs the AVX-512 IFMA kernels
 #[cfg(curve25519_backend = "simd")]
 #[inline]
 fn use_ifma() -> bool {
     ifma_x8::available()
 }
 
-/// Number of independent field elements carried side by side.
+/// Independent field elements held side by side
 pub const LANES: usize = 8;
 
-/// A lane mask: `true` marks a live lane.
+/// One flag per lane, `true` for a live lane
 pub type LaneMask = [bool; LANES];
 
-/// Eight field elements in radix \\(2^{51}\\), stored limb-major:
-/// `limbs[i][lane]` holds limb `i` of the lane's element.
-///
-/// Limb bounds follow `FieldElement51`: limbs stay below \\(2^{52}\\) between
-/// reductions.
+/// Eight radix 2^51 field elements stored limb-major, so `limbs[i][lane]` is limb `i` of a lane
 #[derive(Clone, Copy, Debug)]
-// Cache-line aligned so the limb rows never straddle two lines.
+// The alignment keeps each limb row inside one cache line
 #[repr(align(64))]
 pub struct FieldElementX8 {
     pub limbs: [[u64; LANES]; 5],
@@ -36,7 +34,7 @@ impl FieldElementX8 {
     pub const ZERO: FieldElementX8 = FieldElementX8::splat(FieldElement51::ZERO);
     pub const ONE: FieldElementX8 = FieldElementX8::splat(FieldElement51::ONE);
 
-    /// Broadcast one field element into all lanes.
+    /// Broadcast one field element into all lanes
     pub const fn splat(fe: FieldElement51) -> FieldElementX8 {
         FieldElementX8 {
             limbs: [
@@ -49,7 +47,7 @@ impl FieldElementX8 {
         }
     }
 
-    /// Gather eight independent elements into lane order.
+    /// Gather eight independent elements into lane order
     pub fn from_lanes(lanes: &[FieldElement51; LANES]) -> FieldElementX8 {
         let mut out = FieldElementX8::ZERO;
         for (l, fe) in lanes.iter().enumerate() {
@@ -58,7 +56,7 @@ impl FieldElementX8 {
         out
     }
 
-    /// Extract lane `l` as a serial field element.
+    /// Extract lane `l` as a serial field element
     pub fn lane(&self, l: usize) -> FieldElement51 {
         FieldElement51::from_limbs([
             self.limbs[0][l],
@@ -69,20 +67,20 @@ impl FieldElementX8 {
         ])
     }
 
-    /// Overwrite lane `l`.
+    /// Overwrite lane `l`
     pub fn set_lane(&mut self, l: usize, fe: &FieldElement51) {
         for i in 0..5 {
             self.limbs[i][l] = fe.0[i];
         }
     }
 
-    /// Scatter back to eight serial elements.
+    /// Scatter back to eight serial elements
     #[cfg(test)]
     pub fn to_lanes(self) -> [FieldElement51; LANES] {
         core::array::from_fn(|l| self.lane(l))
     }
 
-    /// Apply a binary serial operation lane-wise.
+    /// Apply a binary serial operation lane by lane
     #[inline]
     fn zip_lanes(
         &self,
@@ -96,7 +94,7 @@ impl FieldElementX8 {
         out
     }
 
-    /// Apply a unary serial operation lane-wise.
+    /// Apply a unary serial operation lane by lane
     #[inline]
     fn map_lanes(&self, op: impl Fn(&FieldElement51) -> FieldElement51) -> FieldElementX8 {
         let mut out = FieldElementX8::ZERO;
@@ -146,7 +144,7 @@ impl FieldElementX8 {
         self.map_lanes(|a| a.square())
     }
 
-    /// Lane-wise \\(2 a^2\\).
+    /// Compute `2 a^2` in every lane
     pub fn square2(&self) -> FieldElementX8 {
         #[cfg(curve25519_backend = "simd")]
         if use_ifma() {
@@ -155,7 +153,7 @@ impl FieldElementX8 {
         self.map_lanes(|a| a.square2())
     }
 
-    /// Square each lane `k` times.
+    /// Square each lane `k` times
     pub fn pow2k(&self, k: u32) -> FieldElementX8 {
         debug_assert!(k > 0);
         #[cfg(curve25519_backend = "simd")]
@@ -165,7 +163,7 @@ impl FieldElementX8 {
         self.map_lanes(|a| a.pow2k(k))
     }
 
-    /// Returns \\((self^{(2^{250} - 1)}, self^{11})\\) via the serial `pow22501` chain.
+    /// Return `(self^(2^250 - 1), self^11)` with the serial `pow22501` chain
     fn pow22501(&self) -> (FieldElementX8, FieldElementX8) {
         let t0 = self.square(); // 1
         let t1 = t0.square().square(); // 3
@@ -191,32 +189,31 @@ impl FieldElementX8 {
         (t19, t3)
     }
 
-    /// Raise every lane to the power \\((p-5)/8 = 2^{252} - 3\\).
+    /// Raise every lane to the power `(p - 5) / 8 = 2^252 - 3`
     pub fn pow_p58(&self) -> FieldElementX8 {
-        // The bits of (p-5)/8 are 101111.....11.
         let (t19, _) = self.pow22501(); // 249..0
         let t20 = t19.pow2k(2); // 251..2
         self.mul(&t20) // 251..2,0
     }
 
-    /// Canonical little-endian encodings, per lane.
+    /// Canonical little-endian encodings, one per lane
     pub fn to_bytes_lanes(self) -> [[u8; 32]; LANES] {
         core::array::from_fn(|l| self.lane(l).to_bytes())
     }
 
-    /// `true` for lanes that are zero mod \\(p\\).
+    /// Flag the lanes that are zero mod p
     pub fn is_zero_lanes(&self) -> LaneMask {
         let bytes = self.to_bytes_lanes();
         core::array::from_fn(|l| bytes[l] == [0u8; 32])
     }
 
-    /// `true` for lanes whose canonical encoding is negative (odd).
+    /// Flag the lanes whose canonical encoding is odd
     pub fn is_negative_lanes(&self) -> LaneMask {
         let bytes = self.to_bytes_lanes();
         core::array::from_fn(|l| bytes[l][0] & 1 == 1)
     }
 
-    /// Lane-wise select: `other` where the mask is true, `self` elsewhere.
+    /// Take `other` in the lanes the mask sets and `self` in the rest
     pub fn select_lanes(&self, other: &FieldElementX8, take_other: &LaneMask) -> Self {
         let mut out = *self;
         for (l, take) in take_other.iter().enumerate() {
@@ -229,17 +226,13 @@ impl FieldElementX8 {
         out
     }
 
-    /// Lane-wise conditional negation.
+    /// Negate the lanes the mask sets
     pub fn negate_lanes(&self, negate: &LaneMask) -> Self {
         self.select_lanes(&self.neg(), negate)
     }
 }
 
-/// Lane-wise \\(\sqrt{u/v}\\), returning the nonnegative root and a mask of
-/// lanes where the ratio was square.
-///
-/// Zero-input conventions match the serial `FieldElement::sqrt_ratio_i`:
-/// `(true, 0)` for \\(u = 0\\), `(false, 0)` for \\(v = 0, u \ne 0\\).
+/// Compute the nonnegative `sqrt(u / v)` per lane with a mask of square lanes, as `FieldElement::sqrt_ratio_i` does
 pub fn sqrt_ratio_i_x8(u: &FieldElementX8, v: &FieldElementX8) -> (LaneMask, FieldElementX8) {
     use crate::constants::SQRT_M1;
 
@@ -266,7 +259,6 @@ pub fn sqrt_ratio_i_x8(u: &FieldElementX8, v: &FieldElementX8) -> (LaneMask, Fie
     let take_prime: LaneMask = core::array::from_fn(|l| flipped_sign[l] || flipped_sign_i[l]);
     let mut r = r.select_lanes(&r_prime, &take_prime);
 
-    // Choose the nonnegative square root.
     let r_is_negative = r.is_negative_lanes();
     r = r.negate_lanes(&r_is_negative);
 
@@ -280,7 +272,7 @@ mod test {
     use super::*;
     use crate::field::FieldElement;
 
-    // Deterministic, canonical pseudorandom elements.
+    // deterministic canonical pseudorandom elements
     fn test_elements(seed: u64) -> [FieldElement51; LANES] {
         let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
         core::array::from_fn(|_| {
@@ -325,12 +317,12 @@ mod test {
         let u_lanes = test_elements(3);
         let v_lanes = test_elements(4);
 
-        // Mix in edge cases: u = 0, v = 0, and a known square ratio.
+        // lanes 0 and 1 cover u = 0 and v = 0
         let mut u_lanes = u_lanes;
         let mut v_lanes = v_lanes;
         u_lanes[0] = FieldElement51::ZERO;
         v_lanes[1] = FieldElement51::ZERO;
-        // lane 2: u/v = (w^2 v)/v is a guaranteed square.
+        // lane 2 holds u / v = w^2, which is always square
         u_lanes[2] = &u_lanes[2].square() * &v_lanes[2];
 
         let (mask, root) = sqrt_ratio_i_x8(

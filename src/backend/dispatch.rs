@@ -6,7 +6,7 @@ use crate::backend::vector;
 use crate::edwards::EdwardsPoint;
 use crate::scalar::Scalar;
 
-/// Bytes of a scalar above which the 128-bit multiplication path does not apply
+/// A scalar below 2^128 has zero bytes from this index up
 const HALF_SCALAR_LENGTH: usize = 16;
 
 /// Which field arithmetic this host runs
@@ -52,7 +52,7 @@ pub fn variable_base_mul(point: &EdwardsPoint, scalar: &Scalar) -> EdwardsPoint 
     }
 }
 
-/// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint
+/// Compute aA + bB in variable time, with B the Ed25519 basepoint
 #[allow(non_snake_case)]
 pub fn vartime_double_base_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     match get_selected_backend() {
@@ -66,10 +66,7 @@ pub fn vartime_double_base_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> Edwa
     }
 }
 
-/// Compute \\(a_1 A_1 + a_2 A_2 + b B\\) in variable time, where \\(B\\) is the Ed25519 basepoint
-///
-/// The caller has to know that \\(a_1\\) and \\(a_2\\) are below \\(2^{128}\\), which is what the
-/// HEEA decomposition hands back.
+/// Compute a1 A1 + a2 A2 + bB in variable time, for a1 and a2 below 2^128
 #[allow(non_snake_case)]
 pub fn vartime_triple_base_mul_128_128_256_prechecked(
     a1: &Scalar,

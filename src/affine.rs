@@ -1,3 +1,7 @@
+//! Edwards points in affine coordinates
+
+// Vendored from curve25519-dalek, BSD-3-Clause
+
 use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
 use crate::field::FieldElement;
 use crate::scalar::Scalar;
@@ -5,7 +9,7 @@ use crate::traits::Identity;
 use core::ops::Mul;
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
-/// Affine Edwards point on untwisted curve.
+/// An Edwards point in affine coordinates
 #[derive(Clone, Copy, Debug)]
 pub struct AffinePoint {
     pub x: FieldElement,
@@ -51,7 +55,7 @@ impl PartialEq for AffinePoint {
 impl Eq for AffinePoint {}
 
 impl AffinePoint {
-    /// Convert to extended coordinates.
+    /// Convert to extended coordinates
     pub fn to_edwards(self) -> EdwardsPoint {
         EdwardsPoint {
             X: self.x,
@@ -61,7 +65,7 @@ impl AffinePoint {
         }
     }
 
-    /// Compress affine Edwards coordinates into `CompressedEdwardsY` format.
+    /// Encode this point as its y coordinate with the sign of x in the top bit
     #[inline]
     pub fn compress(self) -> CompressedEdwardsY {
         let mut s = self.y.to_bytes();

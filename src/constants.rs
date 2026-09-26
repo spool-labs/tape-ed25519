@@ -1,6 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Curve, field and scalar constants and the precomputed basepoint tables
 
-//! This module contains backend-specific constant values, such as the 64-bit limbs of curve constants.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 use crate::backend::serial::curve_models::AffineNielsPoint;
 use crate::backend::serial::u64::field::FieldElement51;
@@ -29,7 +29,7 @@ pub const BASEPOINT_ORDER: Scalar = Scalar {
     ],
 };
 
-/// Edwards `d` value, equal to `-121665/121666 mod p`.
+/// The Edwards curve constant `d = -121665/121666 mod p`
 pub const EDWARDS_D: FieldElement51 = FieldElement51::from_limbs([
     929955233495203,
     466365720129213,
@@ -38,7 +38,7 @@ pub const EDWARDS_D: FieldElement51 = FieldElement51::from_limbs([
     1442794654840575,
 ]);
 
-/// Edwards `2*d` value, equal to `2*(-121665/121666) mod p`.
+/// Twice the Edwards curve constant `d`
 pub const EDWARDS_D2: FieldElement51 = FieldElement51::from_limbs([
     1859910466990425,
     932731440258426,
@@ -47,7 +47,7 @@ pub const EDWARDS_D2: FieldElement51 = FieldElement51::from_limbs([
     633789495995903,
 ]);
 
-/// Precomputed value of one of the square roots of -1 (mod p)
+/// A square root of -1 modulo p
 pub const SQRT_M1: FieldElement51 = FieldElement51::from_limbs([
     1718705420411056,
     234908883556509,
@@ -56,7 +56,7 @@ pub const SQRT_M1: FieldElement51 = FieldElement51::from_limbs([
     765476049583133,
 ]);
 
-/// `L` is the order of base point, i.e. 2^252 + 27742317777372353535851937790883648493
+/// The basepoint order `l` in 52-bit limbs
 pub const L: Scalar52 = Scalar52([
     0x0002631a5cf5d3ed,
     0x000dea2f79cd6581,
@@ -65,10 +65,10 @@ pub const L: Scalar52 = Scalar52([
     0x0000100000000000,
 ]);
 
-/// `L` * `LFACTOR` = -1 (mod 2^52)
+/// The value with `L * LFACTOR = -1 mod 2^52`
 pub const LFACTOR: u64 = 0x51da312547e1b;
 
-/// `R` = R % L where R = 2^260
+/// The Montgomery modulus `R = 2^260` reduced modulo l
 pub const R: Scalar52 = Scalar52([
     0x000f48bd6721e6ed,
     0x0003bab5ac67e45a,
@@ -77,7 +77,7 @@ pub const R: Scalar52 = Scalar52([
     0x00000fffffffffff,
 ]);
 
-/// `RR` = (R^2) % L where R = 2^260
+/// The square of the Montgomery modulus reduced modulo l
 pub const RR: Scalar52 = Scalar52([
     0x0009d265e952d13b,
     0x000d63c715bea69f,
@@ -87,11 +87,7 @@ pub const RR: Scalar52 = Scalar52([
 ]);
 
 #[cfg(test)]
-/// The Ed25519 basepoint, as an `EdwardsPoint`.
-///
-/// This is called `_POINT` to distinguish it from
-/// `ED25519_BASEPOINT_TABLE`, which should be used for scalar
-/// multiplication (it's much faster).
+/// The Ed25519 basepoint as an extended point
 pub const ED25519_BASEPOINT_POINT: EdwardsPoint = EdwardsPoint {
     X: FieldElement51::from_limbs([
         1738742601995546,
@@ -118,7 +114,7 @@ pub const ED25519_BASEPOINT_POINT: EdwardsPoint = EdwardsPoint {
 };
 
 #[cfg(test)]
-/// The Ed25519 basepoint, mul by 2^128, as an `EdwardsPoint`.
+/// The Ed25519 basepoint times 2^128 as an extended point
 pub const ED25519_BASEPOINT_128_POINT: EdwardsPoint = EdwardsPoint {
     X: FieldElement51::from_limbs([
         1573694877509226,
@@ -151,17 +147,10 @@ pub const ED25519_BASEPOINT_128_POINT: EdwardsPoint = EdwardsPoint {
 };
 
 #[cfg(test)]
-/// The 8-torsion subgroup \\(\mathcal E \[8\]\\).
-///
-/// In the case of Curve25519, it is cyclic; the \\(i\\)-th element of
-/// the array is \\(\[i\]P\\), where \\(P\\) is a point of order \\(8\\)
-/// generating \\(\mathcal E\[8\]\\).
-///
-/// Thus \\(\mathcal E\[4\]\\) is the points indexed by `0,2,4,6`, and
-/// \\(\mathcal E\[2\]\\) is the points indexed by `0,4`.
+/// The cyclic 8-torsion subgroup, where entry `i` is `[i]P` for a generator `P` of order 8
 pub const EIGHT_TORSION: [EdwardsPoint; 8] = EIGHT_TORSION_INNER_DOC_HIDDEN;
 
-/// Inner item used to hide limb constants from cargo doc output.
+/// The limbs behind `EIGHT_TORSION`
 #[doc(hidden)]
 #[cfg(test)]
 pub const EIGHT_TORSION_INNER_DOC_HIDDEN: [EdwardsPoint; 8] = [
@@ -305,11 +294,11 @@ pub const EIGHT_TORSION_INNER_DOC_HIDDEN: [EdwardsPoint; 8] = [
     },
 ];
 
-/// Table containing precomputed multiples of the Ed25519 basepoint \\(B = (x, 4/5)\\).
+/// Precomputed multiples of the Ed25519 basepoint
 pub static ED25519_BASEPOINT_TABLE: &EdwardsBasepointTable =
     &ED25519_BASEPOINT_TABLE_INNER_DOC_HIDDEN;
 
-/// Inner constant, used to avoid filling the docs with precomputed points.
+/// The table behind `ED25519_BASEPOINT_TABLE`
 #[doc(hidden)]
 static ED25519_BASEPOINT_TABLE_INNER_DOC_HIDDEN: EdwardsBasepointTable = EdwardsBasepointTable([
     LookupTable([
@@ -6266,7 +6255,7 @@ static ED25519_BASEPOINT_TABLE_INNER_DOC_HIDDEN: EdwardsBasepointTable = Edwards
     ]),
 ]);
 
-/// Odd multiples of the basepoint `[B, 3B, 5B, 7B, 9B, 11B, 13B, 15B, ..., 127B]`.
+/// The odd multiples `B, 3B, ..., 127B` of the basepoint
 pub const AFFINE_ODD_MULTIPLES_OF_BASEPOINT: NafLookupTable8<AffineNielsPoint> = NafLookupTable8([
     AffineNielsPoint {
         y_plus_x: FieldElement51::from_limbs([
@@ -7742,10 +7731,7 @@ pub const AFFINE_ODD_MULTIPLES_OF_BASEPOINT: NafLookupTable8<AffineNielsPoint> =
     },
 ]);
 
-/// Odd multiples `[B', 3B', 5B', 7B', ..., 127B']` of `B' = B * 2^128`,
-/// where `B` is the Ed25519 basepoint.
-///
-/// Regenerate with the `print_odd_multiples_of_basepoint_128` test below.
+/// The odd multiples `B', 3B', ..., 127B'` of `B' = B * 2^128`
 pub const AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128: NafLookupTable8<AffineNielsPoint> =
     NafLookupTable8([
         AffineNielsPoint {
@@ -9255,7 +9241,7 @@ mod test {
         }
     }
 
-    /// Test that SQRT_M1 is the positive square root of -1
+    // SQRT_M1 is the nonnegative square root of -1
     #[test]
     fn test_sqrt_minus_one() {
         let minus_one = FieldElement::MINUS_ONE;
@@ -9273,7 +9259,7 @@ mod test {
         assert_eq!(sign_test_sqrt, minus_one);
     }
 
-    /// Test that d = -121665/121666
+    // EDWARDS_D equals -121665/121666 and EDWARDS_D2 doubles it
     #[test]
     fn test_d_vs_ratio() {
         let a = -&FieldElement51([121665, 0, 0, 0, 0]);
@@ -9308,12 +9294,10 @@ mod test {
     }
 
     // regenerates the source text of `AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128`
-    // cargo test print_odd_multiples_of_basepoint_128 -- --ignored --nocapture
     #[test]
     #[ignore]
     fn print_odd_multiples_of_basepoint_128() {
         fn print_fe(name: &str, fe: &FieldElement51) {
-            // Canonicalize the limbs through a byte round-trip.
             let canonical = FieldElement51::from_bytes(&fe.to_bytes());
             println!("            {name}: FieldElement51::from_limbs([");
             for limb in canonical.0.iter() {
@@ -9337,17 +9321,11 @@ mod test {
         println!("    ]);");
     }
 
-    // Generation of the AVX2 backend's `BASEPOINT_128_ODD_LOOKUP_TABLE` using
-    // only serial arithmetic. A `CachedPoint` for (X : Y : Z : T) stores
-    // (121666(Y-X), 121666(Y+X), 2*121666*Z, -2*121665*T) in interleaved
-    // 26/25-bit limbs. The encoding is projective, so canonical serial values
-    // are a valid representative; each entry is scaled by a small lambda until
-    // every limb is under b <= 0.99, inside the lazy-negation bound b < 0.999.
+    // The helpers below rebuild the AVX2 B' table from serial arithmetic alone
 
     const MASK_26: u64 = (1 << 26) - 1;
 
-    /// The four lane field elements of the `CachedPoint` encoding of `P`, scaled
-    /// by `lambda`.
+    /// The four lane elements of the AVX2 cached encoding of `P`, scaled by `lambda`
     #[allow(non_snake_case)]
     fn cached_point_lanes(P: &EdwardsPoint, lambda: u64) -> [FieldElement51; 4] {
         let lambda = FieldElement51::from_limbs([lambda, 0, 0, 0, 0]);
@@ -9368,8 +9346,7 @@ mod test {
         ]
     }
 
-    /// Interleave four canonical lane elements into the five `u32x8`
-    /// vectors of a `FieldElement2625x4`, mirroring its `new()` layout.
+    /// Interleave four lane elements into the five `u32x8` vectors of a `FieldElement2625x4`
     fn interleave_lanes(lanes: &[FieldElement51; 4]) -> [[u32; 8]; 5] {
         let mut out = [[0u32; 8]; 5];
         let [a, b, c, d] = lanes;
@@ -9388,8 +9365,7 @@ mod test {
         out
     }
 
-    /// True if every 26-bit and 25-bit limb is bounded by b <= 0.99, inside the
-    /// vector backend's lazy-negation bound of b < 0.999.
+    /// Check that every limb stays inside the lazy-negation bound of the AVX2 backend
     fn within_lazy_negation_bounds(lanes: &[FieldElement51; 4]) -> bool {
         lanes.iter().all(|fe| {
             fe.0.iter().all(|limb| {
@@ -9400,8 +9376,7 @@ mod test {
         })
     }
 
-    /// The bounds-safe `CachedPoint` lane elements for each odd multiple
-    /// `[B', 3B', ..., 127B']`.
+    /// The smallest scaling of each odd multiple of `B'` whose limbs fit the bound
     fn avx2_basepoint_128_table_entries() -> [[FieldElement51; 4]; 64] {
         let step = ED25519_BASEPOINT_128_POINT.double();
         let mut point = ED25519_BASEPOINT_128_POINT;
@@ -9421,7 +9396,6 @@ mod test {
     #[test]
     fn avx2_basepoint_128_table_generation_is_consistent() {
         for (i, lanes) in avx2_basepoint_128_table_entries().iter().enumerate() {
-            // Reconstruct the lane elements from the interleaved limbs.
             let vecs = interleave_lanes(lanes);
             let mut recovered = [FieldElement51::ZERO; 4];
             for (lane, recovered) in recovered.iter_mut().enumerate() {
@@ -9438,12 +9412,9 @@ mod test {
                 *recovered = FieldElement51::from_limbs(limbs);
             }
 
-            // The independently computed multiple (2i + 1) * B'.
             let expected = ED25519_BASEPOINT_128_POINT * Scalar::from(2 * i as u64 + 1);
 
-            // Cross-multiplied projective equality of the encoded point
-            // (A : B : C : D) = (121666(Y-X) : 121666(Y+X) : 243332 Z : -243330 T)
-            // against the expected (X : Y : Z : T).
+            // Cross-multiplying compares the scaled cached encoding with the expected point
             let [a, b, c, d] = recovered;
             let two = FieldElement51::from_limbs([2, 0, 0, 0, 0]);
             let c121665 = FieldElement51::from_limbs([121665, 0, 0, 0, 0]);
@@ -9470,8 +9441,7 @@ mod test {
         }
     }
 
-    // regenerates the IFMA `BASEPOINT_128_ODD_LOOKUP_TABLE` statics, widths 8 and 5
-    // cargo test print_ifma_basepoint_128_tables -- --ignored --nocapture
+    // regenerates the IFMA `BASEPOINT_128_ODD_LOOKUP_TABLE` statics at widths 8 and 5
     #[test]
     #[ignore]
     fn print_ifma_basepoint_128_tables() {
@@ -9506,7 +9476,6 @@ mod test {
     }
 
     // regenerates the AVX2 `BASEPOINT_128_ODD_LOOKUP_TABLE` source text
-    // cargo test print_avx2_basepoint_128_table -- --ignored --nocapture
     #[test]
     #[ignore]
     fn print_avx2_basepoint_128_table() {

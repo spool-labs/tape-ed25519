@@ -1,19 +1,6 @@
-// - Isis Agora Lovecruft <isis@patternsinthevoid.net>
-// - Henry de Valence <hdevalence@hdevalence.ca>
+//! Field arithmetic modulo p = 2^255 - 19 built from the backend multiplication and squaring
 
-//! Field arithmetic modulo \\(p = 2\^{255} - 19\\).
-//!
-//! The `solana_ed25519::field` module provides a type alias
-//! `solana_ed25519::field::FieldElement` to a field element type
-//! defined in the `backend` module; either `FieldElement51` or
-//! `FieldElement2625`.
-//!
-//! Field operations defined in terms of machine
-//! operations, such as field multiplication or squaring, are defined in
-//! the backend implementation.
-//!
-//! Field operations defined in terms of other field operations, such as
-//! field inversion or square roots, are defined here.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #![allow(unused_qualifications)]
 
@@ -27,10 +14,7 @@ use subtle::ConstantTimeEq;
 use crate::backend;
 use crate::constants;
 
-/// A `FieldElement` represents an element of the field
-/// \\( \mathbb Z / (2\^{255} - 19)\\).
-///
-/// The `FieldElement` type is pinned to the 64-bit serial implementation.
+/// An element of the field of integers mod 2^255 - 19, on the 64-bit serial backend
 pub type FieldElement = backend::serial::u64::field::FieldElement51;
 
 impl Eq for FieldElement {}
@@ -42,9 +26,7 @@ impl PartialEq for FieldElement {
 }
 
 impl ConstantTimeEq for FieldElement {
-    /// Test equality between two `FieldElement`s.  Since the
-    /// internal representation is not canonical, the field elements
-    /// are normalized to wire format before comparison.
+    /// Compare canonical encodings, since the limb form is not unique
     fn ct_eq(&self, other: &FieldElement) -> Choice {
         self.to_bytes().ct_eq(&other.to_bytes())
     }
@@ -57,23 +39,13 @@ impl Default for FieldElement {
 }
 
 impl FieldElement {
-    /// Determine if this `FieldElement` is negative, in the sense
-    /// used in the ed25519 paper: `x` is negative if the low bit is
-    /// set.
-    ///
-    /// # Return
-    ///
-    /// If negative, return `Choice(1)`.  Otherwise, return `Choice(0)`.
+    /// Return true when the low bit of the canonical encoding is set, which Ed25519 calls negative
     pub fn is_negative(&self) -> Choice {
         let bytes = self.to_bytes();
         (bytes[0] & 1).into()
     }
 
-    /// Determine if this `FieldElement` is zero.
-    ///
-    /// # Return
-    ///
-    /// If zero, return `Choice(1)`.  Otherwise, return `Choice(0)`.
+    /// Return true when this element is zero
     pub fn is_zero(&self) -> Choice {
         let zero = [0u8; 32];
         let bytes = self.to_bytes();
@@ -81,24 +53,13 @@ impl FieldElement {
         bytes.ct_eq(&zero)
     }
 
-    /// Compute (self^(2^250-1), self^11), used as a helper function
-    /// within invert() and pow22523().
-    #[rustfmt::skip] // keep alignment of explanatory comments
+    /// Compute (self^(2^250 - 1), self^11), the shared prefix of `invert` and `pow_p58`
+    #[rustfmt::skip]
     fn pow22501(&self) -> (FieldElement, FieldElement) {
-        // Instead of managing which temporary variables are used
-        // for what, we define as many as we need and leave stack
-        // allocation to the compiler
-        //
-        // Each temporary variable t_i is of the form (self)^e_i.
-        // Squaring t_i corresponds to multiplying e_i by 2,
-        // so the pow2k function shifts e_i left by k places.
-        // Multiplying t_i and t_j corresponds to adding e_i + e_j.
-        //
-        // Temporary t_i                      Nonzero bits of e_i
-        //
-        let t0  = self.square();           // 1         e_0 = 2^1
-        let t1  = t0.square().square();    // 3         e_1 = 2^3
-        let t2  = self * &t1;              // 3,0       e_2 = 2^3 + 2^0
+        // Each trailing note lists the set bits in the exponent of t_i
+        let t0  = self.square();           // 1
+        let t1  = t0.square().square();    // 3
+        let t2  = self * &t1;              // 3,0
         let t3  = &t0 * &t2;               // 3,1,0
         let t4  = t3.square();             // 4,2,1
         let t5  = &t2 * &t4;               // 4,3,2,1,0
@@ -120,9 +81,7 @@ impl FieldElement {
         (t19, t3)
     }
 
-    /// Given a slice of public `FieldElements`, replace each with its inverse.
-    ///
-    /// When an input `FieldElement` is zero, its value is unchanged.
+    /// Replace each public element with its inverse, leaving zeros unchanged
     pub fn invert_batch_alloc(inputs: &mut [FieldElement]) {
         let n = inputs.len();
         let mut scratch = vec![FieldElement::ONE; n];
@@ -130,80 +89,53 @@ impl FieldElement {
         Self::internal_invert_batch(inputs, &mut scratch);
     }
 
-    /// Given a slice of public `FieldElements`, replace each with its inverse. `scratch` can
-    /// contain anything, so long as its length is the same as `inputs`.
-    ///
-    /// When an input `FieldElement` is zero, its value is unchanged.
-    ///
-    /// # Panics
-    /// Panics when `scratch.len() != inputs.len()`
+    /// Invert every element with one inversion by Montgomery's trick, with `scratch` as long as `inputs`
     fn internal_invert_batch(inputs: &mut [FieldElement], scratch: &mut [FieldElement]) {
-        // Montgomery’s Trick and Fast Implementation of Masked AES
-        // Genelle, Prouff and Quisquater
-        // Section 3.2
-
         debug_assert_eq!(inputs.len(), scratch.len());
 
-        // Keep an accumulator of all of the previous products
         let mut acc = FieldElement::ONE;
 
-        // Pass through the input vector, recording the previous
-        // products in the scratch space
+        // Each scratch slot keeps the product of every earlier input
         for (input, scratch) in inputs.iter().zip(scratch.iter_mut()) {
             *scratch = acc;
-            // acc <- acc * input, but skipping zeros (constant-time)
+            // Zeros are skipped in constant time so one zero cannot spoil the others
             #[allow(unused_mut)]
             let mut product = &acc * input;
             acc.conditional_assign(&product, !input.is_zero());
         }
 
-        // acc is nonzero because we skipped zeros in inputs
         assert!(bool::from(!acc.is_zero()));
 
-        // Compute the inverse of all products
         acc = acc.invert();
 
-        // Pass through the vector backwards to compute the inverses
-        // in place
         for (input, scratch) in inputs.iter_mut().rev().zip(scratch.iter_mut().rev()) {
             #[allow(unused_mut)]
             let mut tmp = &acc * input;
             #[allow(unused_mut)]
             let mut inverse = &acc * scratch;
-            // input <- acc * scratch, then acc <- tmp
-            // Again, we skip zeros in a constant-time way
             let nz = !input.is_zero();
             input.conditional_assign(&inverse, nz);
             acc.conditional_assign(&tmp, nz);
         }
     }
 
-    /// Given a nonzero field element, compute its inverse.
-    ///
-    /// The inverse is computed as self^(p-2), since
-    /// x^(p-2)x = x^(p-1) = 1 (mod p).
-    ///
-    /// This function returns zero on input zero.
-    #[rustfmt::skip] // keep alignment of explanatory comments
+    /// Compute the inverse as self^(p - 2), which maps zero to zero
+    #[rustfmt::skip]
     #[allow(clippy::let_and_return)]
     pub fn invert(&self) -> FieldElement {
-        // The bits of p-2 = 2^255 -19 -2 are 11010111111...11.
-        //
-        //                                 nonzero bits of exponent
-        let (t19, t3) = self.pow22501();   // t19: 249..0 ; t3: 3,1,0
+        // Each trailing note lists the set bits of the exponent so far
+        let (t19, t3) = self.pow22501();   // t19 249..0 and t3 3,1,0
         let t20 = t19.pow2k(5);            // 254..5
         let t21 = &t20 * &t3;              // 254..5,3,1,0
 
         t21
     }
 
-    /// Raise this field element to the power (p-5)/8 = 2^252 -3.
-    #[rustfmt::skip] // keep alignment of explanatory comments
+    /// Raise this element to the power (p - 5) / 8 = 2^252 - 3
+    #[rustfmt::skip]
     #[allow(clippy::let_and_return)]
     pub fn pow_p58(&self) -> FieldElement {
-        // The bits of (p-5)/8 are 101111.....11.
-        //
-        //                                 nonzero bits of exponent
+        // Each trailing note lists the set bits of the exponent so far
         let (t19, _) = self.pow22501();    // 249..0
         let t20 = t19.pow2k(2);            // 251..2
         let t21 = self * &t20;             // 251..2,0
@@ -211,43 +143,9 @@ impl FieldElement {
         t21
     }
 
-    /// Given `FieldElements` `u` and `v`, compute either `sqrt(u/v)`
-    /// or `sqrt(i*u/v)` in constant time.
-    ///
-    /// This function always returns the nonnegative square root.
-    ///
-    /// # Return
-    ///
-    /// - `(Choice(1), +sqrt(u/v))  ` if `v` is nonzero and `u/v` is square;
-    /// - `(Choice(1), zero)        ` if `u` is zero;
-    /// - `(Choice(0), zero)        ` if `v` is zero and `u` is nonzero;
-    /// - `(Choice(0), +sqrt(i*u/v))` if `u/v` is nonsquare (so `i*u/v` is square).
-    ///
+    /// Return the nonnegative sqrt(u/v) and true, or sqrt(i u/v) and false when u/v is not square
     pub fn sqrt_ratio_i(u: &FieldElement, v: &FieldElement) -> (Choice, FieldElement) {
-        // Using the same trick as in ed25519 decoding, we merge the
-        // inversion, the square root, and the square test as follows.
-        //
-        // To compute sqrt(α), we can compute β = α^((p+3)/8).
-        // Then β^2 = ±α, so multiplying β by sqrt(-1) if necessary
-        // gives sqrt(α).
-        //
-        // To compute 1/sqrt(α), we observe that
-        //    1/β = α^(p-1 - (p+3)/8) = α^((7p-11)/8)
-        //                            = α^3 * (α^7)^((p-5)/8).
-        //
-        // We can therefore compute sqrt(u/v) = sqrt(u)/sqrt(v)
-        // by first computing
-        //    r = u^((p+3)/8) v^(p-1-(p+3)/8)
-        //      = u u^((p-5)/8) v^3 (v^7)^((p-5)/8)
-        //      = (uv^3) (uv^7)^((p-5)/8).
-        //
-        // If v is nonzero and u/v is square, then r^2 = ±u/v,
-        //                                     so vr^2 = ±u.
-        // If vr^2 =  u, then sqrt(u/v) = r.
-        // If vr^2 = -u, then sqrt(u/v) = r*sqrt(-1).
-        //
-        // If v is zero, r is also zero.
-
+        // r = (u v^3)(u v^7)^((p - 5) / 8) merges the inversion and square root, then v r^2 fixes the sign
         let v3 = &v.square() * v;
         let v7 = &v3.square() * v;
         let mut r = &(u * &v3) * &(u * &v7).pow_p58();
@@ -262,7 +160,6 @@ impl FieldElement {
         let r_prime = &constants::SQRT_M1 * &r;
         r.conditional_assign(&r_prime, flipped_sign_sqrt | flipped_sign_sqrt_i);
 
-        // Choose the nonnegative square root.
         let r_is_negative = r.is_negative();
         r.conditional_negate(r_is_negative);
 
@@ -271,18 +168,7 @@ impl FieldElement {
         (was_nonzero_square, r)
     }
 
-    /// Attempt to compute `sqrt(1/self)` in constant time.
-    ///
-    /// Convenience wrapper around `sqrt_ratio_i`.
-    ///
-    /// This function always returns the nonnegative square root.
-    ///
-    /// # Return
-    ///
-    /// - `(Choice(1), +sqrt(1/self))  ` if `self` is a nonzero square;
-    /// - `(Choice(0), zero)           ` if `self` is zero;
-    /// - `(Choice(0), +sqrt(i/self))  ` if `self` is a nonzero nonsquare;
-    ///
+    /// Return the nonnegative sqrt(1/self) and whether self is a nonzero square
     pub fn invsqrt(&self) -> (Choice, FieldElement) {
         FieldElement::sqrt_ratio_i(&FieldElement::ONE, self)
     }
@@ -292,30 +178,28 @@ impl FieldElement {
 mod test {
     use crate::field::*;
 
-    /// Random element a of GF(2^255-19), from Sage
-    /// a = 1070314506888354081329385823235218444233221\
-    ///     2228051251926706380353716438957572
+    /// A random field element
     static A_BYTES: [u8; 32] = [
         0x04, 0xfe, 0xdf, 0x98, 0xa7, 0xfa, 0x0a, 0x68, 0x84, 0x92, 0xbd, 0x59, 0x08, 0x07, 0xa7,
         0x03, 0x9e, 0xd1, 0xf6, 0xf2, 0xe1, 0xd9, 0xe2, 0xa4, 0xa4, 0x51, 0x47, 0x36, 0xf3, 0xc3,
         0xa9, 0x17,
     ];
 
-    /// Byte representation of a**2
+    /// The encoding of a^2
     static ASQ_BYTES: [u8; 32] = [
         0x75, 0x97, 0x24, 0x9e, 0xe6, 0x06, 0xfe, 0xab, 0x24, 0x04, 0x56, 0x68, 0x07, 0x91, 0x2d,
         0x5d, 0x0b, 0x0f, 0x3f, 0x1c, 0xb2, 0x6e, 0xf2, 0xe2, 0x63, 0x9c, 0x12, 0xba, 0x73, 0x0b,
         0xe3, 0x62,
     ];
 
-    /// Byte representation of 1/a
+    /// The encoding of 1/a
     static AINV_BYTES: [u8; 32] = [
         0x96, 0x1b, 0xcd, 0x8d, 0x4d, 0x5e, 0xa2, 0x3a, 0xe9, 0x36, 0x37, 0x93, 0xdb, 0x7b, 0x4d,
         0x70, 0xb8, 0x0d, 0xc0, 0x55, 0xd0, 0x4c, 0x1d, 0x7b, 0x90, 0x71, 0xd8, 0xe9, 0xb6, 0x18,
         0xe6, 0x30,
     ];
 
-    /// Byte representation of a^((p-5)/8)
+    /// The encoding of a^((p - 5) / 8)
     static AP58_BYTES: [u8; 32] = [
         0x6a, 0x4f, 0x24, 0x89, 0x1f, 0x57, 0x60, 0x36, 0xd0, 0xbe, 0x12, 0x3c, 0x8f, 0xf5, 0xb1,
         0x59, 0xe0, 0xf0, 0xb8, 0x1b, 0x20, 0xd2, 0xb5, 0x1f, 0x15, 0x21, 0xf9, 0xe3, 0xe1, 0x61,
@@ -373,34 +257,34 @@ mod test {
         let zero = FieldElement::ZERO;
         let one = FieldElement::ONE;
         let i = constants::SQRT_M1;
-        let two = &one + &one; // 2 is nonsquare mod p.
-        let four = &two + &two; // 4 is square mod p.
+        let two = &one + &one;
+        let four = &two + &two;
 
-        // 0/0 should return (1, 0) since u is 0
+        // A zero u gives true and zero
         let (choice, sqrt) = FieldElement::sqrt_ratio_i(&zero, &zero);
         assert!(bool::from(choice));
         assert_eq!(sqrt, zero);
         assert!(bool::from(!sqrt.is_negative()));
 
-        // 1/0 should return (0, 0) since v is 0, u is nonzero
+        // A zero v with a nonzero u gives false and zero
         let (choice, sqrt) = FieldElement::sqrt_ratio_i(&one, &zero);
         assert!(bool::from(!choice));
         assert_eq!(sqrt, zero);
         assert!(bool::from(!sqrt.is_negative()));
 
-        // 2/1 is nonsquare, so we expect (0, sqrt(i*2))
+        // Two is not a square mod p, so the result is sqrt(2i)
         let (choice, sqrt) = FieldElement::sqrt_ratio_i(&two, &one);
         assert!(bool::from(!choice));
         assert_eq!(sqrt.square(), &two * &i);
         assert!(bool::from(!sqrt.is_negative()));
 
-        // 4/1 is square, so we expect (1, sqrt(4))
+        // Four is a square mod p
         let (choice, sqrt) = FieldElement::sqrt_ratio_i(&four, &one);
         assert!(bool::from(choice));
         assert_eq!(sqrt.square(), four);
         assert!(bool::from(!sqrt.is_negative()));
 
-        // 1/4 is square, so we expect (1, 1/sqrt(4))
+        // A quarter is a square mod p
         let (choice, sqrt) = FieldElement::sqrt_ratio_i(&one, &four);
         assert!(bool::from(choice));
         assert_eq!(&sqrt.square() * &four, one);
@@ -422,8 +306,7 @@ mod test {
         assert!(a != ainv);
     }
 
-    /// Notice that the last element has the high bit set, which
-    /// should be ignored
+    /// Bytes with the top bit set, which decoding ignores
     static B_BYTES: [u8; 32] = [
         113, 191, 169, 143, 91, 234, 121, 15, 241, 131, 217, 36, 230, 101, 92, 234, 8, 208, 170,
         251, 97, 127, 70, 210, 58, 23, 166, 87, 240, 169, 184, 178,
@@ -453,15 +336,13 @@ mod test {
 
     #[test]
     fn encoding_is_canonical() {
-        // Encode 1 wrongly as 1 + (2^255 - 19) = 2^255 - 18
+        // One plus p encodes one non-canonically
         let one_encoded_wrongly_bytes: [u8; 32] = [
             0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
             0xff, 0xff, 0xff, 0x7f,
         ];
-        // Decode to a field element
         let one = FieldElement::from_bytes(&one_encoded_wrongly_bytes);
-        // .. then check that the encoding is correct
         let one_bytes = one.to_bytes();
         assert_eq!(one_bytes[0], 1);
         for byte in &one_bytes[1..] {
@@ -473,35 +354,4 @@ mod test {
     fn invert_batch_empty() {
         FieldElement::invert_batch_alloc(&mut []);
     }
-
-    // The following two consts were generated with the following sage script:
-    //
-    // import random
-    //
-    // F = GF(2**255 - 19)
-    // # Use a seed to make sure we produce the same test vectors every time
-    // random.seed("Ozamataz Buckshank")
-    //
-    // # Generates test vectors, each of the form (input_bytes, reduced_field_elem_bytes),
-    // # where input_bytes is length input_bytes_len
-    // def gen_example(input_bytes_len):
-    //     # Generate random bytes
-    //     input_bytes = [random.randint(0, 255) for _ in range(input_bytes_len)]
-    //
-    //     # Now convert to a field element and get the reduced byte representation
-    //     elem = F(int.from_bytes(input_bytes, byteorder='little'))
-    //     reduced_bytes = list(int(elem).to_bytes(32, byteorder='little'))
-    //
-    //     # Format input and output as hex strings
-    //     input_bytes_hex = ''.join(f'{byte:02x}' for byte in input_bytes)
-    //     reduced_bytes_hex = ''.join(f'{byte:02x}' for byte in reduced_bytes)
-    //     return f"(\"{input_bytes_hex}\", \"{reduced_bytes_hex}\")"
-    //
-    // print("SET 1: Input bytes are length 64")
-    // for _ in range(5):
-    //     print(gen_example(64))
-    //
-    // print("SET 2: Input bytes are length 48")
-    // for _ in range(5):
-    //     print(gen_example(48))
 }

@@ -1,4 +1,4 @@
-//! What the verifier is held to: known answers, the ZIP-215 edge cases, and the lane verdicts
+//! Tests for known answers, the ZIP-215 edge cases and the lane verdicts
 
 mod differential;
 mod lanes;

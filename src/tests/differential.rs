@@ -1,9 +1,4 @@
-//! Ten thousand random signatures and the ZIP-215 edge vectors, against two outside verifiers
-//!
-//! The oracle is `solana-ed25519`'s `verify_zebra`, the verifier tapesvm called before this crate
-//! existed: `verify` and `verify_batch` must agree with it on every input. `verify_strict` from
-//! `ed25519-dalek` applies the pre-ZIP-215 rules and refuses a low-order or non-canonical point
-//! that ZIP-215 accepts, so the test asserts where the two are the same and where they differ.
+//! Random signatures and the ZIP-215 edge vectors checked against two outside verifiers
 
 use alloc::vec::Vec;
 
@@ -19,16 +14,16 @@ use crate::verifying_key::verify_encoded;
 /// Random cases the harness draws
 const ROUNDS: usize = 10_000;
 
-/// How a case was built, which is what a failure prints
+/// How a case was built, for the failure message
 #[derive(Clone, Copy, Debug)]
 enum Shape {
     /// A signature over the message it was made for
     Honest,
 
-    /// One bit of `s` turned over
+    /// One flipped bit of `s`
     BrokenScalar,
 
-    /// One bit of `R` turned over
+    /// One flipped bit of `R`
     BrokenPoint,
 
     /// An honest signature under somebody else's key
@@ -83,7 +78,7 @@ impl Rng {
     }
 }
 
-/// What the crates.io verifier tapesvm used before says about one case
+/// The crates.io `verify_zebra` verdict on one case
 fn zebra_verdict(case: &Case) -> bool {
     let signature = solana_ed25519::ed_sigs::Signature::from_bytes(&case.signature);
     solana_ed25519::ed_sigs::VerificationKey::try_from(case.key)
@@ -222,7 +217,7 @@ fn matches_zebra() {
         accepted += usize::from(expected);
     }
 
-    // Both verdicts have to be present, or the run proves nothing.
+    // The run must see both verdicts to prove anything
     assert!(accepted > 0 && accepted < cases.len());
 }
 
@@ -259,6 +254,6 @@ fn strict_differs_where_documented() {
         );
     }
 
-    // The low-order vectors alone guarantee divergences, so none would mean the oracle is idle.
+    // The low-order vectors always diverge, so zero divergences means an idle oracle
     assert!(divergences > 0);
 }

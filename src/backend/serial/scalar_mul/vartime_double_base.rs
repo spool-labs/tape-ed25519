@@ -1,4 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Variable-time double-base multiplication `aA + bB` on the serial backend
+
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -11,13 +13,13 @@ use crate::scalar::Scalar;
 use crate::traits::Identity;
 use crate::window::NafLookupTable5;
 
-/// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
+/// Compute `aA + bB` in variable time, where `B` is the Ed25519 basepoint
 pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
     let a_naf = a.non_adjacent_form(5);
 
     let b_naf = b.non_adjacent_form(8);
 
-    // Find starting index
+    // Start at the highest position where either digit is nonzero
     let mut i: usize = 255;
     for j in (0..256).rev() {
         i = j;

@@ -1,4 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Variable-time triple-base scalar multiplication with half-size scalars on the SIMD backends
+
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -34,49 +36,12 @@ pub mod spec {
 
     const DYNAMIC_NAF_WINDOW: usize = 5;
 
-    // The static basepoint tables are width-8 when precomputed tables are
-    // enabled, so both halves of the basepoint scalar use width-8 NAF digits.
-    // Without precomputed tables the width-5 static (for B') and a
-    // runtime-built width-5 table (for B) are used instead.
+    // The static basepoint tables are width 8, so both halves of the basepoint scalar use width-8 digits
     const B_LO_NAF_WINDOW: usize = 8;
 
     const B_HI_NAF_WINDOW: usize = 8;
 
-    /// Compute \\(a_1 A_1 + a_2 A_2 + b B\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
-    ///
-    /// This function is optimized for the case where \\(a_1\\) and \\(a_2\\) are known to be less than
-    /// \\(2^{128}\\), while \\(b\\) is a full 256-bit scalar.
-    ///
-    /// # Precondition
-    ///
-    /// Callers must ensure \\(a_1\\) and \\(a_2\\) are less than \\(2^{128}\\). Use
-    /// `vartime_triple_base_mul_128_128_256` for a checked wrapper that falls back
-    /// to general scalar multiplication for full-width scalars.
-    ///
-    /// # Optimization Strategy
-    ///
-    /// The function decomposes the 256-bit scalar \\(b\\) as \\(b = b_{lo} + b_{hi} \cdot 2^{128}\\),
-    /// where both \\(b_{lo}\\) and \\(b_{hi}\\) are 128-bit values. This allows computing:
-    ///
-    /// \\[
-    /// a_1 A_1 + a_2 A_2 + b_{lo} B + b_{hi} B'
-    /// \\]
-    ///
-    /// where \\(B' = B \cdot 2^{128}\\) is a precomputed constant. Now all four scalars
-    /// (\\(a_1, a_2, b_{lo}, b_{hi}\\)) are 128 bits, and two of the bases (\\(B\\) and \\(B'\\))
-    /// use precomputed tables.
-    ///
-    /// # Implementation
-    ///
-    /// - For \\(A_1\\) and \\(A_2\\): NAF with window width 5 (8 precomputed points each)
-    /// - For \\(B\\) and \\(B'\\): NAF with window width 8 from the static width-8
-    ///   tables when precomputed tables are enabled, otherwise width 5
-    ///
-    /// The algorithm shares doublings across all four scalar multiplications, processing
-    /// only 128 bits instead of 256, providing approximately 2x speedup over the naive approach.
-    ///
-    /// This SIMD implementation uses vectorized point operations (AVX2 or AVX512-IFMA) for
-    /// improved performance over the serial backend.
+    /// Compute `a1 A1 + a2 A2 + b B` in variable time for `a1` and `a2` below 2^128
     pub fn mul_128_128_256_prechecked(
         a1: &Scalar,
         A1: &EdwardsPoint,
@@ -84,28 +49,24 @@ pub mod spec {
         A2: &EdwardsPoint,
         b: &Scalar,
     ) -> EdwardsPoint {
-        // Decompose b into b_lo (lower 128 bits) and b_hi (upper 128 bits)
-        // b = b_lo + b_hi * 2^128
+        // Split b as b_lo + b_hi 2^128 so every scalar in the loop is 128 bits
         let b_bytes = b.as_bytes();
 
         let mut b_lo_bytes = [0u8; 32];
         let mut b_hi_bytes = [0u8; 32];
 
-        // Copy lower 16 bytes to b_lo, upper 16 bytes to b_hi
         b_lo_bytes[..16].copy_from_slice(&b_bytes[..16]);
         b_hi_bytes[..16].copy_from_slice(&b_bytes[16..]);
 
         let b_lo = Scalar::from_canonical_bytes_unchecked(b_lo_bytes);
         let b_hi = Scalar::from_canonical_bytes_unchecked(b_hi_bytes);
 
-        // Compute NAF representations (all scalars are now ~128 bits)
         let a1_naf = a1.non_adjacent_form_128(DYNAMIC_NAF_WINDOW);
         let a2_naf = a2.non_adjacent_form_128(DYNAMIC_NAF_WINDOW);
         let b_lo_naf = b_lo.non_adjacent_form_128(B_LO_NAF_WINDOW);
         let b_hi_naf = b_hi.non_adjacent_form_128(B_HI_NAF_WINDOW);
 
-        // Find starting index - check all NAFs up to bit 127
-        // (with potential carry to bit 128 or 129)
+        // Skip the leading positions where every digit schedule is zero
         let mut i: usize = HEEA_MAX_INDEX;
         for j in (0..=HEEA_MAX_INDEX).rev() {
             i = j;
@@ -114,13 +75,12 @@ pub mod spec {
             }
         }
 
-        // Create lookup tables using SIMD-optimized CachedPoint
         let table_A1 = NafLookupTable5::<CachedPoint>::from(A1);
         let table_A2 = NafLookupTable5::<CachedPoint>::from(A2);
 
         let table_B = &BASEPOINT_ODD_LOOKUP_TABLE;
 
-        // B' = B * 2^128.
+        // This table holds odd multiples of B' = B 2^128
         let table_B_128 = &BASEPOINT_128_ODD_LOOKUP_TABLE;
 
         let mut Q = ExtendedPoint::identity();
@@ -128,7 +88,6 @@ pub mod spec {
         loop {
             Q = Q.double();
 
-            // Add contributions from a1*A1
             match a1_naf[i].cmp(&0) {
                 Ordering::Greater => {
                     Q = &Q + &table_A1.select(a1_naf[i] as usize);
@@ -139,7 +98,6 @@ pub mod spec {
                 Ordering::Equal => {}
             }
 
-            // Add contributions from a2*A2
             match a2_naf[i].cmp(&0) {
                 Ordering::Greater => {
                     Q = &Q + &table_A2.select(a2_naf[i] as usize);
@@ -150,7 +108,6 @@ pub mod spec {
                 Ordering::Equal => {}
             }
 
-            // Add contributions from b_lo*B
             match b_lo_naf[i].cmp(&0) {
                 Ordering::Greater => {
                     Q = &Q + &table_B.select(b_lo_naf[i] as usize);
@@ -161,7 +118,6 @@ pub mod spec {
                 Ordering::Equal => {}
             }
 
-            // Add contributions from b_hi*B' where B' = B * 2^128
             match b_hi_naf[i].cmp(&0) {
                 Ordering::Greater => {
                     Q = &Q + &table_B_128.select(b_hi_naf[i] as usize);
@@ -181,27 +137,12 @@ pub mod spec {
         Q.into()
     }
 
-    /// Build the width-8 `CachedPoint` odd-multiples table for `A`, for use
-    /// with [`mul_128_128_256_prechecked_prepared`].
-    ///
-    /// This must run with AVX2 available; callers dispatch on the selected
-    /// backend before invoking it.
+    /// Build the width-8 odd-multiples table of `A` for the prepared multiplication
     pub fn build_prepared_a2_table(A: &EdwardsPoint) -> NafLookupTable8<CachedPoint> {
         NafLookupTable8::<CachedPoint>::from(A)
     }
 
-    /// Compute \\(a_1 A_1 + a_2 A_2 + b B\\) as in `mul_128_128_256_prechecked`,
-    /// but with \\(A_2\\) supplied as a prebuilt width-8 `CachedPoint` table
-    /// instead of a point.
-    ///
-    /// If `negate_A2` is true, the contribution is \\(-a_2 A_2\\), computed by
-    /// negating the \\(a_2\\) NAF digits so the cached table can be used for
-    /// either sign.
-    ///
-    /// # Precondition
-    ///
-    /// As for `mul_128_128_256_prechecked`, callers must ensure \\(a_1\\) and
-    /// \\(a_2\\) are less than \\(2^{128}\\).
+    /// Compute `a1 A1 + a2 A2 + b B` with `A2` given as a prebuilt table, negated when `negate_A2` is set
     pub fn mul_128_128_256_prechecked_prepared(
         a1: &Scalar,
         A1: &EdwardsPoint,
@@ -210,8 +151,7 @@ pub mod spec {
         negate_A2: bool,
         b: &Scalar,
     ) -> EdwardsPoint {
-        // Decompose b into b_lo (lower 128 bits) and b_hi (upper 128 bits)
-        // b = b_lo + b_hi * 2^128
+        // Split b as b_lo + b_hi 2^128 so every scalar in the loop is 128 bits
         let b_bytes = b.as_bytes();
 
         let mut b_lo_bytes = [0u8; 32];
@@ -223,12 +163,11 @@ pub mod spec {
         let b_lo = Scalar::from_canonical_bytes_unchecked(b_lo_bytes);
         let b_hi = Scalar::from_canonical_bytes_unchecked(b_hi_bytes);
 
-        // Compute NAF representations (all scalars are now ~128 bits). The a2
-        // digits are width 8 to match the prebuilt table.
+        // The a2 digits are width 8 to match the prebuilt table
         let a1_naf = a1.non_adjacent_form_128(DYNAMIC_NAF_WINDOW);
         let mut a2_naf = a2.non_adjacent_form_128(8);
         if negate_A2 {
-            // Digits are odd with magnitude <= 127, so negation cannot overflow.
+            // Digits are odd with magnitude at most 127, so negation cannot overflow
             for digit in a2_naf.iter_mut() {
                 *digit = -*digit;
             }
@@ -236,8 +175,7 @@ pub mod spec {
         let b_lo_naf = b_lo.non_adjacent_form_128(B_LO_NAF_WINDOW);
         let b_hi_naf = b_hi.non_adjacent_form_128(B_HI_NAF_WINDOW);
 
-        // Find starting index - check all NAFs up to bit 127
-        // (with potential carry to bit 128 or 129)
+        // Skip the leading positions where every digit schedule is zero
         let mut i: usize = HEEA_MAX_INDEX;
         for j in (0..=HEEA_MAX_INDEX).rev() {
             i = j;
@@ -250,7 +188,7 @@ pub mod spec {
 
         let table_B = &BASEPOINT_ODD_LOOKUP_TABLE;
 
-        // B' = B * 2^128.
+        // This table holds odd multiples of B' = B 2^128
         let table_B_128 = &BASEPOINT_128_ODD_LOOKUP_TABLE;
 
         let mut Q = ExtendedPoint::identity();

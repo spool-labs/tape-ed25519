@@ -1,8 +1,6 @@
 //! Macros for the AVX-512 lane kernels and the eight-lane SHA-512
 
-/// `W[t] = sigma1(W[t-2]) + W[t-7] + sigma0(W[t-15]) + W[t-16]`, addressed by
-/// `t`'s position `$i` in the sixteen-word ring. Every index folds at compile
-/// time, so the ring never needs a computed address.
+/// Compute schedule word `$i` in the sixteen-word ring with indices fixed at compile time
 macro_rules! sched {
     ($w:expr, $i:expr) => {{
         const I: usize = $i;
@@ -25,9 +23,7 @@ macro_rules! sched {
     }};
 }
 
-/// One round on one group, the eight state words taken by role. Only `d` and
-/// `h` are written, so the renaming is the caller's rotation and no state word
-/// is ever copied.
+/// Run one SHA-512 round on one group, writing only `d` and `h` so no state word moves
 macro_rules! round {
     ($k:expr, $w:expr, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {{
         let big_s1 = _mm512_ternarylogic_epi64::<0x96>(
@@ -51,10 +47,7 @@ macro_rules! round {
     }};
 }
 
-/// Round `$kbase + $slot` for every group listed, with one K load shared by
-/// all of them. The `sched` form lifts the next round's schedule word ahead of
-/// this round's dependency chain so the two overlap; the `plain` form is
-/// rounds 0..15, whose words came in with the block.
+/// Run round `$kbase + $slot` for every listed group with one shared K load
 macro_rules! round_step {
     (plain, $kbase:expr, $slot:expr
      $(, [$w:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident])+) => {{
@@ -69,8 +62,7 @@ macro_rules! round_step {
     }};
 }
 
-/// Eight rounds with the roles rotated one step per round, which is the whole
-/// point: after eight the naming is back where it started and nothing moved.
+/// Run eight rounds and rotate the state roles one step per round
 macro_rules! rounds8 {
     ($mode:tt, $kbase:expr, $off:expr
      $(, [$w:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident])+) => {{
@@ -85,17 +77,12 @@ macro_rules! rounds8 {
     }};
 }
 
-/// The eighty rounds of one block for every group listed. Sixteen rounds per
-/// iteration, not eight, because the ring repeats every sixteen: only the round
-/// index leaves the body, and it reaches nothing but the indexed K table. Round
-/// 79 leaves a schedule word nothing reads, which is the price of a body with
-/// no round-dependent branch in it.
+/// Run the eighty rounds of one block for every listed group
 macro_rules! compress_rounds {
     ($([$w:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident]),+) => {{
         rounds8!(plain, 0usize, 0 $(, [$w, $a, $b, $c, $d, $e, $f, $g, $h])+);
         rounds8!(plain, 0usize, 8 $(, [$w, $a, $b, $c, $d, $e, $f, $g, $h])+);
-        // W[16] is the ring's first computed word; from here each round leaves
-        // the next one ready.
+        // Each later round computes the schedule word for the round after it
         $( sched!($w, 16); )+
         for base in (16..80).step_by(16) {
             rounds8!(sched, base, 0 $(, [$w, $a, $b, $c, $d, $e, $f, $g, $h])+);
@@ -104,9 +91,7 @@ macro_rules! compress_rounds {
     }};
 }
 
-/// Load one block's schedule and unpack the state into the eight role names
-/// the round macros rotate. A macro, not a function, so the block loop keeps
-/// the state in registers instead of handing it across a call.
+/// Load one block's schedule and unpack the state into eight role variables
 macro_rules! block_in {
     ($state:expr, $block:expr, $bswap:expr, $w:ident,
      $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
@@ -122,8 +107,7 @@ macro_rules! block_in {
     };
 }
 
-/// Feed the block's result back into the state; a lane past its last block is
-/// masked out and keeps the digest it already has.
+/// Add the block's result into the state for every lane still inside its message
 macro_rules! block_out {
     ($state:expr, $active:expr,
      $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
@@ -158,15 +142,14 @@ macro_rules! shr {
     };
 }
 
-/// The F51x4 multiplication waves on eight lanes, emitted textually so several
-/// products can be scheduled in one function. Limbs in and out are below 2^52.
+/// Emit the eight-lane radix-51 multiplication waves inline, limbs below 2^52 in and out
 macro_rules! mul_waves_raw_emit {
     ($xe:expr, $ye:expr) => {{
         let x: [__m512i; 5] = $xe;
         let y: [__m512i; 5] = $ye;
 
         unsafe {
-            // Accumulators for terms with coeff 1
+            // Accumulators for terms with weight 1
             let mut z0_1 = splat(0);
             let mut z1_1 = splat(0);
             let mut z2_1 = splat(0);
@@ -177,7 +160,7 @@ macro_rules! mul_waves_raw_emit {
             let mut z7_1 = splat(0);
             let mut z8_1 = splat(0);
 
-            // Accumulators for terms with coeff 2
+            // Accumulators for terms with weight 2
             let mut z0_2 = splat(0);
             let mut z1_2 = splat(0);
             let mut z2_2 = splat(0);
@@ -189,7 +172,6 @@ macro_rules! mul_waves_raw_emit {
             let mut z8_2 = splat(0);
             let mut z9_2 = splat(0);
 
-            // Wave 0
             z4_1 = madd52lo(z4_1, x[2], y[2]);
             z5_2 = madd52hi(z5_2, x[2], y[2]);
             z5_1 = madd52lo(z5_1, x[4], y[1]);
@@ -199,7 +181,6 @@ macro_rules! mul_waves_raw_emit {
             z7_1 = madd52lo(z7_1, x[4], y[3]);
             z8_2 = madd52hi(z8_2, x[4], y[3]);
 
-            // Wave 1
             z4_1 = madd52lo(z4_1, x[3], y[1]);
             z5_2 = madd52hi(z5_2, x[3], y[1]);
             z5_1 = madd52lo(z5_1, x[3], y[2]);
@@ -209,7 +190,6 @@ macro_rules! mul_waves_raw_emit {
             z7_1 = madd52lo(z7_1, x[3], y[4]);
             z8_2 = madd52hi(z8_2, x[3], y[4]);
 
-            // Wave 2
             z8_1 = madd52lo(z8_1, x[4], y[4]);
             z9_2 = madd52hi(z9_2, x[4], y[4]);
             z4_1 = madd52lo(z4_1, x[4], y[0]);
@@ -222,7 +202,6 @@ macro_rules! mul_waves_raw_emit {
             let z8 = add(z8_1, add(z8_2, z8_2));
             let z9 = add(z9_2, z9_2);
 
-            // Wave 3
             z3_1 = madd52lo(z3_1, x[3], y[0]);
             z4_2 = madd52hi(z4_2, x[3], y[0]);
             z4_1 = madd52lo(z4_1, x[1], y[3]);
@@ -235,7 +214,6 @@ macro_rules! mul_waves_raw_emit {
             let z6 = add(z6_1, add(z6_2, z6_2));
             let z7 = add(z7_1, add(z7_2, z7_2));
 
-            // Wave 4
             z3_1 = madd52lo(z3_1, x[2], y[1]);
             z4_2 = madd52hi(z4_2, x[2], y[1]);
             z4_1 = madd52lo(z4_1, x[0], y[4]);
@@ -247,7 +225,6 @@ macro_rules! mul_waves_raw_emit {
 
             let z5 = add(z5_1, add(z5_2, z5_2));
 
-            // Wave 5
             z3_1 = madd52lo(z3_1, x[1], y[2]);
             z4_2 = madd52hi(z4_2, x[1], y[2]);
             z0_1 = madd52lo(z0_1, x[0], y[0]);
@@ -261,7 +238,6 @@ macro_rules! mul_waves_raw_emit {
             let mut t1 = splat(0);
             let r19 = splat(19);
 
-            // Wave 6
             t0 = madd52hi(t0, r19, z9);
             t1 = madd52lo(t1, r19, shr!(z9, 52));
             z3_1 = madd52lo(z3_1, x[0], y[3]);
@@ -271,7 +247,6 @@ macro_rules! mul_waves_raw_emit {
             z3_2 = madd52lo(z3_2, r19, shr!(z7, 52));
             z0_1 = madd52lo(z0_1, r19, z5);
 
-            // Wave 7
             z4_1 = madd52lo(z4_1, r19, z9);
             z1_1 = madd52lo(z1_1, r19, z6);
             z0_2 = madd52lo(z0_2, r19, add(t0, t1));
@@ -281,7 +256,6 @@ macro_rules! mul_waves_raw_emit {
             z2_2 = madd52hi(z2_2, r19, z6);
             z3_2 = madd52hi(z3_2, r19, z7);
 
-            // Wave 8
             z3_1 = madd52lo(z3_1, r19, z8);
             z4_2 = madd52lo(z4_2, r19, shr!(z8, 52));
 
@@ -296,14 +270,13 @@ macro_rules! mul_waves_raw_emit {
     }};
 }
 
-/// The F51x4 squaring waves on eight lanes, emitted textually. Limbs in and out
-/// are below 2^52.
+/// Emit the eight-lane radix-51 squaring waves inline, limbs below 2^52 in and out
 macro_rules! square_waves_raw_emit {
     ($xe:expr) => {{
         let x: [__m512i; 5] = $xe;
 
         unsafe {
-            // Represent values with coeff. 2
+            // Accumulators for terms with weight 2
             let mut z1_2 = splat(0);
             let mut z2_2 = splat(0);
             let mut z3_2 = splat(0);
@@ -313,7 +286,7 @@ macro_rules! square_waves_raw_emit {
             let mut z7_2 = splat(0);
             let mut z9_2 = splat(0);
 
-            // Represent values with coeff. 4
+            // Accumulators for terms with weight 4
             let mut z2_4 = splat(0);
             let mut z3_4 = splat(0);
             let mut z4_4 = splat(0);

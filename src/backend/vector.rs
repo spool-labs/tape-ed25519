@@ -1,7 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Vectorized field and point operations on the 4-way parallel Edwards formulas
 
-//! Vectorized field and point operations, on a modification of the 4-way parallel formulas of
-//! Hisil, Wong, Carter and Dawson
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #[macro_use]
 mod macros;

@@ -1,12 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Scalar multiplication on the serial field arithmetic
 
-//! Implementations of various scalar multiplication algorithms.
-//!
-//! Note that all of these implementations use serial code for field
-//! arithmetic with the multi-model strategy described in the
-//! `curve_models` module.  The vectorized AVX2 backend has its own
-//! scalar multiplication implementations, since it only uses one
-//! curve model.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #[allow(missing_docs)]
 pub mod variable_base;

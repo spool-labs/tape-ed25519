@@ -1,8 +1,4 @@
 //! Eight signatures at a time, one per SIMD lane, each with its own verdict
-//!
-//! Groups of eight verification equations advance in lockstep, and no field operation crosses a
-//! lane. Every lane checks the same HEEA-transformed cofactored equation, under the same ZIP-215
-//! rules, as the single-signature verifier, so the two agree on every input.
 
 #![allow(non_snake_case)]
 
@@ -35,25 +31,22 @@ const ORDER_STACK_CAP: usize = 128;
 /// Bytes in a SHA-512 block
 const BLOCK_LENGTH: usize = 128;
 
-/// Bytes SHA-512 padding adds to a message: one marker byte and a 16-byte length
+/// Length of SHA-512 padding, one marker byte and a 16-byte length
 const PADDING_LENGTH: usize = 1 + 16;
 
-/// Bytes the `R || A` prefix adds in front of every hashed message
+/// Length of the `R || A` prefix in front of every hashed message
 const PREFIX_LENGTH: usize = HALF_LENGTH + VERIFYING_KEY_LENGTH;
 
-/// Shortest tail worth padding into a group instead of verifying one at a time
+/// Shortest tail that is padded into a group
 const PADDED_TAIL_FLOOR: usize = 3;
 
-/// Cofactor doublings the ZIP-215 equation ends with
+/// The ZIP-215 equation ends with this many cofactor doublings
 const COFACTOR_DOUBLINGS: u32 = 3;
 
 /// Doublings between two radix-16 digit positions
 const DIGIT_DOUBLINGS: usize = 4;
 
-/// Whether the lane path beats the single-signature verifier on this host
-///
-/// Only AVX-512 IFMA does. A NEON multiply needs as many widening multiplies per lane as a serial
-/// one, so the fork's NEON kernels stayed behind and AArch64 verifies one signature at a time.
+/// Whether this host runs the lane path, which only AVX-512 IFMA makes faster
 pub fn is_lane_engine_available() -> bool {
     #[cfg(curve25519_backend = "simd")]
     {
@@ -84,13 +77,10 @@ pub fn verify_batch(items: &[Item<'_>]) -> Vec<bool> {
             &mut heap[..]
         }
     };
-    // A group's lanes advance to the longest message's block count, so grouping by hash cost keeps
-    // a long message from charging the short ones. The index breaks ties, which makes the unstable
-    // sort stable in effect.
+    // Sort by hash block count so a long message does not slow a group of short ones
     order.sort_unstable_by_key(|&index| (hash_blocks(items[index as usize].2.len()), index));
 
-    // Two groups at a time while sixteen remain: one hash pass serves both, and adjacent groups in
-    // this order cost the same block count.
+    // Pair two groups while sixteen items remain so one hash pass serves both
     let mut done = 0;
     while done + 2 * LANES <= count {
         let pair: [[Item<'_>; LANES]; 2] = core::array::from_fn(|group| {
@@ -114,8 +104,7 @@ pub fn verify_batch(items: &[Item<'_>]) -> Vec<bool> {
         done += LANES;
     }
 
-    // A tail of three or more is cheaper padded into one group, the pad lanes repeating the first
-    // tail item; one or two go through the single verifier.
+    // Pad a tail of three or more into one group by repeating its first item
     let tail = &order[done..];
     if tail.len() >= PADDED_TAIL_FLOOR {
         let group: [Item<'_>; LANES] =
@@ -134,7 +123,7 @@ pub fn verify_batch(items: &[Item<'_>]) -> Vec<bool> {
     verdicts
 }
 
-/// SHA-512 blocks one message costs, the `R || A` prefix and the padding counted
+/// Count the SHA-512 blocks one message costs with prefix and padding
 fn hash_blocks(message_len: usize) -> u32 {
     (PREFIX_LENGTH + message_len + PADDING_LENGTH).div_ceil(BLOCK_LENGTH) as u32
 }
@@ -151,7 +140,7 @@ fn verify_group(group: &[Item<'_>; LANES]) -> LaneMask {
     run_curve_stage(&a_bytes, &r_bytes, &digits, &alive)
 }
 
-/// Verify two full groups, their challenge hashes taken in one sixteen-wide pass
+/// Verify two full groups with one sixteen-wide challenge hash pass
 fn verify_group_pair(pair: &[[Item<'_>; LANES]; 2]) -> [LaneMask; 2] {
     let a_bytes: [[[u8; VERIFYING_KEY_LENGTH]; LANES]; 2] =
         core::array::from_fn(|group| core::array::from_fn(|lane| pair[group][lane].0));
@@ -169,7 +158,7 @@ fn verify_group_pair(pair: &[[Item<'_>; LANES]; 2]) -> [LaneMask; 2] {
     })
 }
 
-/// The challenge scalars of one group, hashed eight-wide where the vector unit allows
+/// Compute one group's challenge scalars, eight-wide where the vector unit allows
 fn challenge_scalars(
     a_bytes: &[[u8; VERIFYING_KEY_LENGTH]; LANES],
     r_bytes: &[[u8; HALF_LENGTH]; LANES],
@@ -177,7 +166,7 @@ fn challenge_scalars(
 ) -> [Scalar; LANES] {
     #[cfg(curve25519_backend = "simd")]
     if ifma_x8::available() {
-        // SAFETY: the kernel is reached only behind the cpuid check above.
+        // SAFETY: the cpuid check above guards the kernel
         let digests = unsafe { challenge_digests_x8(r_bytes, a_bytes, messages) };
         return core::array::from_fn(|lane| Scalar::from_bytes_mod_order_wide(&digests[lane]));
     }
@@ -185,7 +174,7 @@ fn challenge_scalars(
     core::array::from_fn(|lane| challenge(&r_bytes[lane], &a_bytes[lane], messages[lane]))
 }
 
-/// The same for two groups, sixteen-wide where the vector unit allows
+/// Compute two groups' challenge scalars, sixteen-wide where the vector unit allows
 fn challenge_scalars_pair(
     a_bytes: &[[[u8; VERIFYING_KEY_LENGTH]; LANES]; 2],
     r_bytes: &[[[u8; HALF_LENGTH]; LANES]; 2],
@@ -193,7 +182,7 @@ fn challenge_scalars_pair(
 ) -> [[Scalar; LANES]; 2] {
     #[cfg(curve25519_backend = "simd")]
     if ifma_x8::available() {
-        // SAFETY: the kernel is reached only behind the cpuid check above.
+        // SAFETY: the cpuid check above guards the kernel
         let digests = unsafe { challenge_digests_x16(r_bytes, a_bytes, messages) };
         return core::array::from_fn(|group| {
             core::array::from_fn(|lane| Scalar::from_bytes_mod_order_wide(&digests[group][lane]))
@@ -216,7 +205,7 @@ fn prepare_group(
     k: &[Scalar; LANES],
     s_bytes: &[[u8; HALF_LENGTH]; LANES],
 ) -> (GroupDigits, LaneMask) {
-    // A non-canonical s invalidates only its own lane.
+    // A non-canonical s invalidates only its own lane
     let mut alive: LaneMask = [true; LANES];
     let s: [Scalar; LANES] = core::array::from_fn(|lane| {
         match Option::<Scalar>::from(Scalar::from_canonical_bytes(s_bytes[lane])) {
@@ -228,10 +217,7 @@ fn prepare_group(
         }
     });
 
-    // HEEA per lane: rho == tau*k (mod l) up to the reported sign, giving the equation
-    // tau*s B + rho A' - tau R with A' = -A when rho == tau*k and A' = A otherwise, the sign folded
-    // into the rho digits. Working mod l is sound here: the [8] multiplication annihilates the
-    // l-multiple and the torsion.
+    // Each lane checks tau*s B + rho A' - tau R with the HEEA sign folded into the rho digits
     let mut b = [[0u64; LANES]; HEEA_DIGITS];
     let mut a = [[0i8; HEEA_DIGITS]; LANES];
     let mut r = [[0i8; HEEA_DIGITS]; LANES];
@@ -250,7 +236,7 @@ fn prepare_group(
         negate(&mut r[lane]);
     }
 
-    // First digit position with any contribution.
+    // Find the highest position with any nonzero digit
     let mut start = 0;
     for position in (0..HEEA_DIGITS).rev() {
         let is_live = (0..LANES)
@@ -273,7 +259,7 @@ fn run_curve_stage(
 ) -> LaneMask {
     #[cfg(curve25519_backend = "simd")]
     if ifma_x8::available() {
-        // SAFETY: the kernel is reached only behind the cpuid check above.
+        // SAFETY: the cpuid check above guards the kernel
         return unsafe {
             ifma_x8::fused::verify_curve_x8(a_encodings, r_encodings, None, digits, alive)
         };
@@ -282,7 +268,7 @@ fn run_curve_stage(
     verify_curve_portable(a_encodings, r_encodings, digits, alive)
 }
 
-/// The portable curve stage, the same structure as the fused IFMA path
+/// Run the curve stage without IFMA in the same structure as the fused path
 fn verify_curve_portable(
     a_encodings: &[[u8; VERIFYING_KEY_LENGTH]; LANES],
     r_encodings: &[[u8; HALF_LENGTH]; LANES],
@@ -291,7 +277,6 @@ fn verify_curve_portable(
 ) -> LaneMask {
     let mut alive = *alive_in;
 
-    // Eight-wide decompression, a non-canonical encoding accepted.
     let (A, a_valid) = decompress_x8(a_encodings);
     let (R, r_valid) = decompress_x8(r_encodings);
     for lane in 0..LANES {
@@ -327,7 +312,6 @@ fn verify_curve_portable(
         last = Some(completed);
     }
 
-    // The cofactor doublings, then the identity test.
     let checked = match last {
         Some(completed) => completed.as_extended().mul_by_pow_2(COFACTOR_DOUBLINGS),
         None => ExtendedPointX8::IDENTITY,

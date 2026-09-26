@@ -1,6 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! AVX2 field and point arithmetic with four field elements per vector
 
-//! The AVX2 half of the vectorized strategy: one 64-bit lane per field element, 32-bit limbs
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 pub mod field;
 

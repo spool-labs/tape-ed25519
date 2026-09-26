@@ -1,10 +1,6 @@
-// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause. See LICENSE.
+//! Lane-per-signature verification with eight equations in lockstep, one signature per SIMD lane
 
-//! Lane-per-signature verification backend.
-//!
-//! One independent signature per SIMD lane: eight verification equations
-//! advance in lockstep, each with its own verdict, and no field operation
-//! ever crosses lanes.
+// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
 #[cfg(curve25519_backend = "simd")]
 #[macro_use]

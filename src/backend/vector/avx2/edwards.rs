@@ -1,28 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! AVX2 extended and cached points on the parallel Edwards formulas
 
-//! Parallel Edwards Arithmetic for Curve25519.
-//!
-//! This module currently has two point types:
-//!
-//! * `ExtendedPoint`: a point stored in vector-friendly format, with
-//!   vectorized doubling and addition;
-//!
-//! * `CachedPoint`: used for readdition.
-//!
-//! Details on the formulas can be found in the documentation for the
-//! parent `avx2` module.
-//!
-//! This API is designed to be safe: vectorized points can only be
-//! created from serial points (which do validation on decompression),
-//! and operations on valid points return valid points, so invalid
-//! point states should be unrepresentable.
-//!
-//! This design goal is met, with one exception: the `Neg`
-//! implementation for the `CachedPoint` performs a lazy negation, so
-//! that subtraction can be efficiently implemented as a negation and
-//! an addition.  Repeatedly negating a `CachedPoint` will cause its
-//! coefficients to grow and eventually overflow.  Repeatedly negating
-//! a point should not be necessary anyways.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -43,13 +21,7 @@ use crate::traits::Identity;
 use super::constants;
 use super::field::{FieldElement2625x4, Lanes, Shuffle};
 
-/// A point on Curve25519, using parallel Edwards formulas for curve
-/// operations.
-///
-/// # Invariant
-///
-/// The coefficients of an `ExtendedPoint` are bounded with
-/// \\( b < 0.007 \\).
+/// A point in extended coordinates with every limb bounded by b < 0.007
 #[derive(Clone, Copy, Debug)]
 pub struct ExtendedPoint(pub FieldElement2625x4);
 
@@ -100,65 +72,33 @@ impl Identity for ExtendedPoint {
 
 #[unsafe_target_feature("avx2")]
 impl ExtendedPoint {
-    /// Compute the double of this point.
+    /// Double this point
     pub fn double(&self) -> ExtendedPoint {
-        // Want to compute (X1 Y1 Z1 X1+Y1).
-        // Not sure how to do this less expensively than computing
-        // (X1 Y1 Z1 T1) --(256bit shuffle)--> (X1 Y1 X1 Y1)
-        // (X1 Y1 X1 Y1) --(2x128b shuffle)--> (Y1 X1 Y1 X1)
-        // and then adding.
-
-        // Set tmp0 = (X1 Y1 X1 Y1)
+        // Build (X1 Y1 Z1 X1+Y1) from two shuffles and an add
         let mut tmp0 = self.0.shuffle(Shuffle::ABAB);
 
-        // Set tmp1 = (Y1 X1 Y1 X1)
         let mut tmp1 = tmp0.shuffle(Shuffle::BADC);
 
-        // Set tmp0 = (X1 Y1 Z1 X1+Y1)
         tmp0 = self.0.blend(tmp0 + tmp1, Lanes::D);
 
-        // Set tmp1 = tmp0^2, negating the D values
+        // tmp1 = (S1 S2 S3 -S4) with b < 0.007
         tmp1 = tmp0.square_and_negate_D();
-        // Now tmp1 = (S1 S2 S3 -S4) with b < 0.007
 
-        // See discussion of bounds in the module-level documentation.
-        // We want to compute
-        //
-        //    + | S1 | S1 | S1 | S1 |
-        //    + | S2 |    |    | S2 |
-        //    + |    |    | S3 |    |
-        //    + |    |    | S3 |    |
-        //    + |    |    |    |-S4 |
-        //    + |    | 2p | 2p |    |
-        //    - |    | S2 | S2 |    |
-        //    =======================
-        //        S5   S6   S8   S9
-
+        // Sum into (S5 S6 S8 S9) = (S1 + S2, S1 - S2, S1 - S2 + 2 S3, S1 + S2 - S4)
         let zero = FieldElement2625x4::ZERO;
         let S_1 = tmp1.shuffle(Shuffle::AAAA);
         let S_2 = tmp1.shuffle(Shuffle::BBBB);
 
         tmp0 = zero.blend(tmp1 + tmp1, Lanes::C);
-        // tmp0 = (0, 0,  2S_3, 0)
         tmp0 = tmp0.blend(tmp1, Lanes::D);
-        // tmp0 = (0, 0,  2S_3, -S_4)
         tmp0 = tmp0 + S_1;
-        // tmp0 = (  S_1,   S_1, S_1 + 2S_3, S_1 - S_4)
         tmp0 = tmp0 + zero.blend(S_2, Lanes::AD);
-        // tmp0 = (S_1 + S_2,   S_1, S_1 + 2S_3, S_1 + S_2 - S_4)
         tmp0 = tmp0 + zero.blend(S_2.negate_lazy(), Lanes::BC);
-        // tmp0 = (S_1 + S_2, S_1 - S_2, S_1 - S_2 + 2S_3, S_1 + S_2 - S_4)
-        //    b < (     1.01,       1.6,             2.33,             1.6)
-        // Now tmp0 = (S_5, S_6, S_8, S_9)
 
-        // Set tmp1 = ( S_9,  S_6,  S_6,  S_9)
-        //        b < ( 1.6,  1.6,  1.6,  1.6)
         tmp1 = tmp0.shuffle(Shuffle::DBBD);
-        // Set tmp0 = ( S_8,  S_5,  S_8,  S_5)
-        //        b < (2.33, 1.01, 2.33, 1.01)
         tmp0 = tmp0.shuffle(Shuffle::CACA);
 
-        // Bounds on (tmp0, tmp1) are (2.33, 1.6) < (2.5, 1.75).
+        // (S8 S5 S8 S5) times (S9 S6 S6 S9) stays within the multiply bounds (2.5, 1.75)
         ExtendedPoint(&tmp0 * &tmp1)
     }
 
@@ -171,16 +111,7 @@ impl ExtendedPoint {
     }
 }
 
-/// A cached point with some precomputed variables used for readdition.
-///
-/// # Warning
-///
-/// It is not safe to negate this point more than once.
-///
-/// # Invariant
-///
-/// As long as the `CachedPoint` is not repeatedly negated, its
-/// coefficients will be bounded with \\( b < 1.0 \\).
+/// A point prepared for addition, bounded by b < 1.0 until negated twice
 #[derive(Clone, Copy, Debug)]
 pub struct CachedPoint(pub FieldElement2625x4);
 
@@ -190,15 +121,11 @@ impl From<ExtendedPoint> for CachedPoint {
         let mut x = P.0;
 
         x = x.blend(x.diff_sum(), Lanes::AB);
-        // x = (Y2 - X2, Y2 + X2, Z2, T2) = (S2 S3 Z2 T2)
 
         x = x * (121666, 121666, 2 * 121666, 2 * 121665);
-        // x = (121666*S2 121666*S3 2*121666*Z2 2*121665*T2)
 
         x = x.blend(-x, Lanes::D);
-        // x = (121666*S2 121666*S3 2*121666*Z2 -2*121665*T2)
 
-        // The coefficients of the output are bounded with b < 0.007.
         CachedPoint(x)
     }
 }
@@ -231,12 +158,7 @@ impl ConditionallySelectable for CachedPoint {
 #[unsafe_target_feature("avx2")]
 impl Neg for &CachedPoint {
     type Output = CachedPoint;
-    /// Lazily negate the point.
-    ///
-    /// # Warning
-    ///
-    /// Because this method does not perform a reduction, it is not
-    /// safe to repeatedly negate a point.
+    /// Negate without reducing, which is safe once per point
     fn neg(self) -> CachedPoint {
         let swapped = self.0.shuffle(Shuffle::BACD);
         CachedPoint(swapped.blend(swapped.negate_lazy(), Lanes::D))
@@ -247,36 +169,24 @@ impl Neg for &CachedPoint {
 impl Add<&CachedPoint> for &ExtendedPoint {
     type Output = ExtendedPoint;
 
-    /// Add an `ExtendedPoint` and a `CachedPoint`.
+    /// Add a cached point to this point
     fn add(self, other: &CachedPoint) -> ExtendedPoint {
-        // The coefficients of an `ExtendedPoint` are reduced after
-        // every operation.  If the `CachedPoint` was negated, its
-        // coefficients grow by one bit.  So on input, `self` is
-        // bounded with `b < 0.007` and `other` is bounded with
-        // `b < 1.0`.
-
         let mut tmp = self.0;
 
+        // tmp = (S0 S1 Z1 T1) with b < 1.6, and `other` stays below b < 1.0
         tmp = tmp.blend(tmp.diff_sum(), Lanes::AB);
-        // tmp = (Y1-X1 Y1+X1 Z1 T1) = (S0 S1 Z1 T1) with b < 1.6
 
-        // (tmp, other) bounded with b < (1.6, 1.0) < (2.5, 1.75).
         tmp = &tmp * &other.0;
-        // tmp = (S0*S2' S1*S3' Z1*Z2' T1*T2') = (S8 S9 S10 S11)
 
         tmp = tmp.shuffle(Shuffle::ABDC);
-        // tmp = (S8 S9 S11 S10)
 
+        // tmp = (S12 S13 S14 S15)
         tmp = tmp.diff_sum();
-        // tmp = (S9-S8 S9+S8 S10-S11 S10+S11) = (S12 S13 S14 S15)
 
         let t0 = tmp.shuffle(Shuffle::ADDA);
-        // t0 = (S12 S15 S15 S12)
         let t1 = tmp.shuffle(Shuffle::CBCB);
-        // t1 = (S14 S13 S14 S13)
 
-        // All coefficients of t0, t1 are bounded with b < 1.6.
-        // Return (S12*S14 S15*S13 S15*S14 S12*S13) = (X3 Y3 Z3 T3)
+        // (S12 S15 S15 S12) times (S14 S13 S14 S13) gives (X3 Y3 Z3 T3)
         ExtendedPoint(&t0 * &t1)
     }
 }
@@ -285,11 +195,7 @@ impl Add<&CachedPoint> for &ExtendedPoint {
 impl Sub<&CachedPoint> for &ExtendedPoint {
     type Output = ExtendedPoint;
 
-    /// Implement subtraction by negating the point and adding.
-    ///
-    /// Empirically, this seems about the same cost as a custom
-    /// subtraction impl (maybe because the benefit is cancelled by
-    /// increased code size?)
+    /// Subtract by adding the lazy negation
     fn sub(self, other: &CachedPoint) -> ExtendedPoint {
         self + &(-other)
     }
@@ -316,7 +222,6 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable5<CachedPoint> {
         for i in 0..7 {
             Ai[i + 1] = (&A2 + &Ai[i]).into();
         }
-        // Now Ai = [A, 3A, 5A, 7A, 9A, 11A, 13A, 15A]
         NafLookupTable5(Ai)
     }
 }
@@ -330,7 +235,6 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable8<CachedPoint> {
         for i in 0..63 {
             Ai[i + 1] = (&A2 + &Ai[i]).into();
         }
-        // Now Ai = [A, 3A, 5A, 7A, 9A, 11A, 13A, 15A, ..., 127A]
         NafLookupTable8(Ai)
     }
 }
@@ -340,7 +244,7 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable8<CachedPoint> {
 mod test {
     use super::*;
 
-    #[rustfmt::skip] // keep alignment of some S* calculations
+    #[rustfmt::skip]
     fn serial_add(P: edwards::EdwardsPoint, Q: edwards::EdwardsPoint) -> edwards::EdwardsPoint {
         use crate::backend::serial::u64::field::FieldElement51;
 
@@ -353,50 +257,50 @@ mod test {
             };
         }
 
-        let S0 = &Y1 - &X1; // R1
-        let S1 = &Y1 + &X1; // R3
-        let S2 = &Y2 - &X2; // R2
-        let S3 = &Y2 + &X2; // R4
+        let S0 = &Y1 - &X1;
+        let S1 = &Y1 + &X1;
+        let S2 = &Y2 - &X2;
+        let S3 = &Y2 + &X2;
         print_var!(S0);
         print_var!(S1);
         print_var!(S2);
         print_var!(S3);
         println!("");
 
-        let S4 = &S0 * &S2; // R5 = R1 * R2
-        let S5 = &S1 * &S3; // R6 = R3 * R4
-        let S6 = &Z1 * &Z2; // R8
-        let S7 = &T1 * &T2; // R7
+        let S4 = &S0 * &S2;
+        let S5 = &S1 * &S3;
+        let S6 = &Z1 * &Z2;
+        let S7 = &T1 * &T2;
         print_var!(S4);
         print_var!(S5);
         print_var!(S6);
         print_var!(S7);
         println!("");
 
-        let S8  =  &S4 *    &FieldElement51([  121666,0,0,0,0]);  // R5
-        let S9  =  &S5 *    &FieldElement51([  121666,0,0,0,0]);  // R6
-        let S10 =  &S6 *    &FieldElement51([2*121666,0,0,0,0]);  // R8
-        let S11 =  &S7 * &(-&FieldElement51([2*121665,0,0,0,0])); // R7
+        let S8  =  &S4 *    &FieldElement51([  121666,0,0,0,0]);
+        let S9  =  &S5 *    &FieldElement51([  121666,0,0,0,0]);
+        let S10 =  &S6 *    &FieldElement51([2*121666,0,0,0,0]);
+        let S11 =  &S7 * &(-&FieldElement51([2*121665,0,0,0,0]));
         print_var!(S8);
         print_var!(S9);
         print_var!(S10);
         print_var!(S11);
         println!("");
 
-        let S12 =  &S9 - &S8;  // R1
-        let S13 =  &S9 + &S8;  // R4
-        let S14 = &S10 - &S11; // R2
-        let S15 = &S10 + &S11; // R3
+        let S12 =  &S9 - &S8;
+        let S13 =  &S9 + &S8;
+        let S14 = &S10 - &S11;
+        let S15 = &S10 + &S11;
         print_var!(S12);
         print_var!(S13);
         print_var!(S14);
         print_var!(S15);
         println!("");
 
-        let X3 = &S12 * &S14; // R1 * R2
-        let Y3 = &S15 * &S13; // R3 * R4
-        let Z3 = &S15 * &S14; // R2 * R3
-        let T3 = &S12 * &S13; // R1 * R4
+        let X3 = &S12 * &S14;
+        let Y3 = &S15 * &S13;
+        let Z3 = &S15 * &S14;
+        let T3 = &S12 * &S13;
 
         edwards::EdwardsPoint {
             X: X3,
@@ -407,10 +311,8 @@ mod test {
     }
 
     fn addition_test_helper(P: edwards::EdwardsPoint, Q: edwards::EdwardsPoint) {
-        // Test the serial implementation of the parallel addition formulas
         let R_serial: edwards::EdwardsPoint = serial_add(P.into(), Q.into()).into();
 
-        // Test the vector implementation of the parallel readdition formulas
         let cached_Q = CachedPoint::from(ExtendedPoint::from(Q));
         let R_vector: edwards::EdwardsPoint = (&ExtendedPoint::from(P) + &cached_Q).into();
         let S_vector: edwards::EdwardsPoint = (&ExtendedPoint::from(P) - &cached_Q).into();
@@ -465,7 +367,7 @@ mod test {
             };
         }
 
-        let S0 = &X1 + &Y1; // R1
+        let S0 = &X1 + &Y1;
         print_var!(S0);
         println!("");
 

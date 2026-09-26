@@ -6,7 +6,7 @@ use crate::scalar::Scalar;
 use crate::signature::HALF_LENGTH;
 use crate::verifying_key::VERIFYING_KEY_LENGTH;
 
-/// Bytes a SHA-512 digest takes
+/// Length of a SHA-512 digest
 const DIGEST_LENGTH: usize = 64;
 
 /// Hash `R || A || message` and reduce the wide digest to a scalar

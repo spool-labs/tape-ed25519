@@ -1,4 +1,6 @@
-//! Code for fixed- and sliding-window functionality
+//! Lookup tables of point multiples for fixed and sliding window multiplication
+
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -15,8 +17,7 @@ use crate::backend::serial::curve_models::AffineNielsPoint;
 use crate::backend::serial::curve_models::ProjectiveNielsPoint;
 use crate::edwards::EdwardsPoint;
 
-// The first one has to be named "LookupTable" because it's used as a constructor for consts.
-// This is radix-16
+// The radix-16 table is plain `LookupTable` because the precomputed constants build it
 impl_lookup_table! {
     Name = LookupTable,
     Size = 8,
@@ -25,8 +26,7 @@ impl_lookup_table! {
     ConversionRange = 0..7
 }
 
-// The rest only get used to make basepoint tables
-// radix-32
+// The larger radices only build basepoint tables
 impl_lookup_table! {
     Name = LookupTableRadix32,
     Size = 16,
@@ -34,7 +34,6 @@ impl_lookup_table! {
     SizeRange = 1..17,
     ConversionRange = 0..15
 }
-// radix-64
 impl_lookup_table! {
     Name = LookupTableRadix64,
     Size = 32,
@@ -42,7 +41,6 @@ impl_lookup_table! {
     SizeRange = 1..33,
     ConversionRange = 0..31
 }
-// radix-128
 impl_lookup_table! {
     Name = LookupTableRadix128,
     Size = 64,
@@ -50,7 +48,6 @@ impl_lookup_table! {
     SizeRange = 1..65,
     ConversionRange = 0..63
 }
-// radix-256
 impl_lookup_table! {
     Name = LookupTableRadix256,
     Size = 128,
@@ -59,15 +56,14 @@ impl_lookup_table! {
     ConversionRange = 0..127
 }
 
-// For homogeneity we then alias it to "LookupTableRadix16".
 pub type LookupTableRadix16<Point> = LookupTable<Point>;
 
-/// Holds odd multiples 1A, 3A, ..., 15A of a point A.
+/// The odd multiples A, 3A, ..., 15A of a point A
 #[derive(Clone, Copy)]
 pub struct NafLookupTable5<Point>(pub [Point; 8]);
 
 impl<Point: Copy> NafLookupTable5<Point> {
-    /// Given public, odd \\( x \\) with \\( 0 < x < 2^4 \\), return \\(xA\\).
+    /// Return xA for a public odd x below 16
     pub fn select(&self, x: usize) -> Point {
         debug_assert_eq!(x & 1, 1);
         debug_assert!(x < 16);
@@ -89,7 +85,6 @@ impl From<&EdwardsPoint> for NafLookupTable5<ProjectiveNielsPoint> {
         for i in 0..7 {
             Ai[i + 1] = (&A2 + &Ai[i]).as_extended().as_projective_niels();
         }
-        // Now Ai = [A, 3A, 5A, 7A, 9A, 11A, 13A, 15A]
         NafLookupTable5(Ai)
     }
 }
@@ -101,17 +96,16 @@ impl From<&EdwardsPoint> for NafLookupTable5<AffineNielsPoint> {
         for i in 0..7 {
             Ai[i + 1] = (&A2 + &Ai[i]).as_extended().as_affine_niels();
         }
-        // Now Ai = [A, 3A, 5A, 7A, 9A, 11A, 13A, 15A]
         NafLookupTable5(Ai)
     }
 }
 
-/// Holds stuff up to 8. The only time we use tables this big is for precomputed basepoint tables
-/// and multiscalar multiplication (which requires alloc).
+/// The odd multiples A, 3A, ..., 127A of a point A
 #[derive(Clone, Copy)]
 pub struct NafLookupTable8<Point>(pub [Point; 64]);
 
 impl<Point: Copy> NafLookupTable8<Point> {
+    /// Return xA for a public odd x below 128
     pub fn select(&self, x: usize) -> Point {
         debug_assert_eq!(x & 1, 1);
         debug_assert!(x < 128);
@@ -139,7 +133,6 @@ impl From<&EdwardsPoint> for NafLookupTable8<ProjectiveNielsPoint> {
         for i in 0..63 {
             Ai[i + 1] = (&A2 + &Ai[i]).as_extended().as_projective_niels();
         }
-        // Now Ai = [A, 3A, 5A, 7A, 9A, 11A, 13A, 15A, ..., 127A]
         NafLookupTable8(Ai)
     }
 }
@@ -151,7 +144,6 @@ impl From<&EdwardsPoint> for NafLookupTable8<AffineNielsPoint> {
         for i in 0..63 {
             Ai[i + 1] = (&A2 + &Ai[i]).as_extended().as_affine_niels();
         }
-        // Now Ai = [A, 3A, 5A, 7A, 9A, 11A, 13A, 15A, ..., 127A]
         NafLookupTable8(Ai)
     }
 }

@@ -1,4 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Variable-time double-base scalar multiplication on the SIMD backends
+
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -24,13 +26,13 @@ pub mod spec {
     use crate::traits::Identity;
     use crate::window::NafLookupTable5;
 
-    /// Compute \\(aA + bB\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
+    /// Compute `aA + bB` in variable time, where `B` is the Ed25519 basepoint
     pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
         let a_naf = a.non_adjacent_form(5);
 
         let b_naf = b.non_adjacent_form(8);
 
-        // Find starting index
+        // Skip the leading positions where both digit schedules are zero
         let mut i: usize = 255;
         for j in (0..256).rev() {
             i = j;

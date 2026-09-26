@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-/// Why a key, a signature or a check did not stand
+/// Why a key, a signature or a check failed
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 pub enum Error {
     /// The 32 bytes of the key do not decode to a point on the curve
@@ -13,13 +13,13 @@ pub enum Error {
     #[error("invalid signature")]
     InvalidSignature,
 
-    /// A slice of the wrong length was handed to a decoder
+    /// A decoder received a slice of the wrong length
     #[error("slice is {given} bytes, expected {expected}")]
     WrongLength {
-        /// Bytes the caller handed over
+        /// Length of the slice the caller passed
         given: usize,
 
-        /// Bytes the decoder wanted
+        /// Length the decoder expects
         expected: usize,
     },
 }

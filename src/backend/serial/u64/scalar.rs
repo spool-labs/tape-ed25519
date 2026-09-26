@@ -1,15 +1,6 @@
-//! Arithmetic mod \\(2\^{252} + 27742317777372353535851937790883648493\\)
-//! with five \\(52\\)-bit unsigned limbs.
-//!
-//! \\(51\\)-bit limbs would cover the desired bit range (\\(253\\)
-//! bits), but isn't large enough to reduce a \\(512\\)-bit number with
-//! Montgomery multiplication, so \\(52\\) bits is used instead.  To see
-//! that this is safe for intermediate results, note that the largest
-//! limb in a \\(5\times 5\\) product of \\(52\\)-bit limbs will be
-//!
-//! ```text
-//! (0xfffffffffffff^2) * 5 = 0x4ffffffffffff60000000000005 (107 bits).
-//! ```
+//! Arithmetic modulo the group order l on five 52-bit limbs
+
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 use core::fmt::Debug;
 use core::ops::{Index, IndexMut};
@@ -17,8 +8,7 @@ use subtle::{Choice, ConditionallySelectable};
 
 use crate::constants;
 
-/// The `Scalar52` struct represents an element in
-/// \\(\mathbb Z / \ell \mathbb Z\\) as 5 \\(52\\)-bit limbs.
+/// An element of Z/lZ as five 52-bit limbs, wide enough for Montgomery reduction of 512-bit values
 #[derive(Clone, Copy, Default)]
 pub struct Scalar52(pub [u64; 5]);
 
@@ -41,18 +31,18 @@ impl IndexMut<usize> for Scalar52 {
     }
 }
 
-/// u64 * u64 = u128 multiply helper
+/// Multiply two u64 values into a u128
 #[inline(always)]
 fn m(x: u64, y: u64) -> u128 {
     (x as u128) * (y as u128)
 }
 
 impl Scalar52 {
-    /// The scalar \\( 0 \\).
+    /// The scalar zero
     pub const ZERO: Scalar52 = Scalar52([0, 0, 0, 0, 0]);
 
-    /// Unpack a 32 byte / 256 bit scalar into 5 52-bit limbs.
-    #[rustfmt::skip] // keep alignment of s[*] calculations
+    /// Unpack 32 bytes into five 52-bit limbs
+    #[rustfmt::skip]
     pub fn from_bytes(bytes: &[u8; 32]) -> Scalar52 {
         let mut words = [0u64; 4];
         for i in 0..4 {
@@ -71,12 +61,11 @@ impl Scalar52 {
         s[3] = ((words[2] >> 28) | (words[3] << 36)) & mask;
         s[4] =  (words[3] >> 16)                     & top_mask;
 
-
         s
     }
 
-    /// Reduce a 64 byte / 512 bit scalar mod l
-    #[rustfmt::skip] // keep alignment of lo[*] and hi[*] calculations
+    /// Reduce 64 bytes modulo l
+    #[rustfmt::skip]
     pub fn from_bytes_wide(bytes: &[u8; 64]) -> Scalar52 {
         let mut words = [0u64; 8];
         for i in 0..8 {
@@ -100,17 +89,15 @@ impl Scalar52 {
         hi[3] = ((words[6] >> 32) | (words[ 7] << 32)) & mask;
         hi[4] =   words[7] >> 20                             ;
 
-        lo = Scalar52::montgomery_mul(&lo, &constants::R);  // (lo * R) / R = lo
-        hi = Scalar52::montgomery_mul(&hi, &constants::RR); // (hi * R^2) / R = hi * R
-
-
-
+        // Montgomery products by R and R^2 give lo and hi * R, so their sum is the reduced value
+        lo = Scalar52::montgomery_mul(&lo, &constants::R);
+        hi = Scalar52::montgomery_mul(&hi, &constants::RR);
 
         Scalar52::add(&hi, &lo)
     }
 
-    /// Pack the limbs of this `Scalar52` into 32 bytes
-    #[rustfmt::skip] // keep alignment of s[*] calculations
+    /// Pack the limbs into 32 bytes
+    #[rustfmt::skip]
     #[allow(clippy::identity_op)]
     pub fn to_bytes(self) -> [u8; 32] {
         let mut s = [0u8; 32];
@@ -151,39 +138,36 @@ impl Scalar52 {
         s
     }
 
-    /// Compute `a + b` (mod l)
+    /// Compute `a + b` modulo l
     pub fn add(a: &Scalar52, b: &Scalar52) -> Scalar52 {
         let mut sum = Scalar52::ZERO;
         let mask = (1u64 << 52) - 1;
 
-        // a + b
         let mut carry: u64 = 0;
         for i in 0..5 {
             carry = a[i] + b[i] + (carry >> 52);
             sum[i] = carry & mask;
         }
 
-        // subtract l if the sum is >= l
         Scalar52::sub(&sum, &constants::L)
     }
 
-    /// Compute `a - b` (mod l)
+    /// Compute `a - b` modulo l
     pub fn sub(a: &Scalar52, b: &Scalar52) -> Scalar52 {
         let mut difference = Scalar52::ZERO;
         let mask = (1u64 << 52) - 1;
 
-        // a - b
         let mut borrow: u64 = 0;
         for i in 0..5 {
             borrow = a[i].wrapping_sub(b[i] + (borrow >> 63));
             difference[i] = borrow & mask;
         }
 
-        // conditionally add l if the difference is negative
         difference.conditional_add_l(Choice::from((borrow >> 63) as u8));
         difference
     }
 
+    /// Add l when `condition` is set and return the top limb before masking
     pub fn conditional_add_l(&mut self, condition: Choice) -> u64 {
         let mut carry: u64 = 0;
         let mask = (1u64 << 52) - 1;
@@ -197,7 +181,7 @@ impl Scalar52 {
         carry
     }
 
-    /// Compute a raw in-place carrying right shift over the limbs.
+    /// Shift the limbs right by one bit in place and return the bit shifted out
     #[inline(always)]
     pub fn shr1_assign(&mut self) -> u64 {
         let mut carry: u64 = 0;
@@ -210,10 +194,10 @@ impl Scalar52 {
         carry
     }
 
-    /// Compute `a * b`
+    /// Compute the unreduced product `a * b`
     #[inline(always)]
-    #[rustfmt::skip] // keep alignment of z[*] calculations
-    pub (crate) fn mul_internal(a: &Scalar52, b: &Scalar52) -> [u128; 9] {
+    #[rustfmt::skip]
+    pub fn mul_internal(a: &Scalar52, b: &Scalar52) -> [u128; 9] {
         let mut z = [0u128; 9];
 
         z[0] = m(a[0], b[0]);
@@ -229,9 +213,9 @@ impl Scalar52 {
         z
     }
 
-    /// Compute `a^2`
+    /// Compute the unreduced square `a^2`
     #[inline(always)]
-    #[rustfmt::skip] // keep alignment of return calculations
+    #[rustfmt::skip]
     fn square_internal(a: &Scalar52) -> [u128; 9] {
         let aa = [
             a[0] * 2,
@@ -253,10 +237,10 @@ impl Scalar52 {
         ]
     }
 
-    /// Compute `limbs/R` (mod l), where R is the Montgomery modulus 2^260
+    /// Compute `limbs / R` modulo l for the Montgomery modulus R = 2^260
     #[inline(always)]
-    #[rustfmt::skip] // keep alignment of n* and r* calculations
-    pub (crate) fn montgomery_reduce(limbs: &[u128; 9]) -> Scalar52 {
+    #[rustfmt::skip]
+    pub fn montgomery_reduce(limbs: &[u128; 9]) -> Scalar52 {
 
         #[inline(always)]
         fn part1(sum: u128) -> (u128, u64) {
@@ -270,28 +254,28 @@ impl Scalar52 {
             (sum >> 52, w)
         }
 
-        // note: l[3] is zero, so its multiples can be skipped
+        // Limb 3 of l is zero, so its products are skipped
         let l = &constants::L;
 
-        // the first half computes the Montgomery adjustment factor n, and begins adding n*l to make limbs divisible by R
+        // The low half finds the factor n that makes limbs + n * l divisible by R
         let (carry, n0) = part1(        limbs[0]);
         let (carry, n1) = part1(carry + limbs[1] + m(n0, l[1]));
         let (carry, n2) = part1(carry + limbs[2] + m(n0, l[2]) + m(n1, l[1]));
         let (carry, n3) = part1(carry + limbs[3]               + m(n1, l[2]) + m(n2, l[1]));
         let (carry, n4) = part1(carry + limbs[4] + m(n0, l[4])               + m(n2, l[2]) + m(n3, l[1]));
 
-        // limbs is divisible by R now, so we can divide by R by simply storing the upper half as the result
+        // The high half of the sum is the quotient by R
         let (carry, r0) = part2(carry + limbs[5]               + m(n1, l[4])               + m(n3, l[2])   + m(n4, l[1]));
         let (carry, r1) = part2(carry + limbs[6]                             + m(n2,l[4])                  + m(n4, l[2]));
         let (carry, r2) = part2(carry + limbs[7]                                           + m(n3, l[4])                );
         let (carry, r3) = part2(carry + limbs[8]                                                           + m(n4, l[4]));
         let         r4 = carry as u64;
 
-        // result may be >= l, so attempt to subtract l
+        // The quotient can reach l, so one conditional subtraction follows
         Scalar52::sub(&Scalar52([r0, r1, r2, r3, r4]), l)
     }
 
-    /// Compute `a * b` (mod l)
+    /// Compute `a * b` modulo l
     #[inline(never)]
     #[allow(unused_mut)]
     pub fn mul(a: &Scalar52, b: &Scalar52) -> Scalar52 {
@@ -302,7 +286,7 @@ impl Scalar52 {
         Scalar52::montgomery_reduce(&rr_limbs)
     }
 
-    /// Compute `a^2` (mod l)
+    /// Compute `a^2` modulo l
     #[inline(never)]
     #[allow(unused_mut)]
     pub fn square(&self) -> Scalar52 {
@@ -313,7 +297,7 @@ impl Scalar52 {
         Scalar52::montgomery_reduce(&rr_limbs)
     }
 
-    /// Compute `(a * b) / R` (mod l), where R is the Montgomery modulus 2^260
+    /// Compute `(a * b) / R` modulo l
     #[inline(never)]
     #[allow(unused_mut)]
     pub fn montgomery_mul(a: &Scalar52, b: &Scalar52) -> Scalar52 {
@@ -322,7 +306,7 @@ impl Scalar52 {
         Scalar52::montgomery_reduce(&limbs)
     }
 
-    /// Compute `(a^2) / R` (mod l) in Montgomery form, where R is the Montgomery modulus 2^260
+    /// Compute `a^2 / R` modulo l
     #[inline(never)]
     #[allow(unused_mut)]
     pub fn montgomery_square(&self) -> Scalar52 {
@@ -331,13 +315,13 @@ impl Scalar52 {
         Scalar52::montgomery_reduce(&limbs)
     }
 
-    /// Puts a Scalar52 in to Montgomery form, i.e. computes `a*R (mod l)`
+    /// Convert into Montgomery form by computing `a * R` modulo l
     #[inline(never)]
     pub fn as_montgomery(&self) -> Scalar52 {
         Scalar52::montgomery_mul(self, &constants::RR)
     }
 
-    /// Takes a Scalar52 out of Montgomery form, i.e. computes `a/R (mod l)`
+    /// Convert out of Montgomery form by computing `a / R` modulo l
     #[allow(clippy::wrong_self_convention)]
     #[inline(never)]
     pub fn from_montgomery(&self) -> Scalar52 {
@@ -354,12 +338,7 @@ impl Scalar52 {
 mod test {
     use super::*;
 
-    /// Note: x is 2^253-1 which is slightly larger than the largest scalar produced by
-    /// this implementation (l-1), and should show there are no overflows for valid scalars
-    ///
-    /// x = 14474011154664524427946373126085988481658748083205070504932198000989141204991
-    /// x = 7237005577332262213973186563042994240801631723825162898930247062703686954002 mod l
-    /// x = 3057150787695215392275360544382990118917283750546154083604586903220563173085*R mod l in Montgomery form
+    /// The value 2^253 - 1, just above l - 1, which exercises the limb bounds
     pub static X: Scalar52 = Scalar52([
         0x000fffffffffffff,
         0x000fffffffffffff,
@@ -368,7 +347,7 @@ mod test {
         0x00001fffffffffff,
     ]);
 
-    /// x^2 = 3078544782642840487852506753550082162405942681916160040940637093560259278169 mod l
+    /// The square of X modulo l
     pub static XX: Scalar52 = Scalar52([
         0x0001668020217559,
         0x000531640ffd0ec0,
@@ -377,7 +356,7 @@ mod test {
         0x000006ce65046df0,
     ]);
 
-    /// x^2 = 4413052134910308800482070043710297189082115023966588301924965890668401540959*R mod l in Montgomery form
+    /// The square of X modulo l in Montgomery form
     pub static XX_MONT: Scalar52 = Scalar52([
         0x000c754eea569a5c,
         0x00063b6ed36cb215,
@@ -386,7 +365,7 @@ mod test {
         0x0000061db6c6f26f,
     ]);
 
-    /// y = 6145104759870991071742105800796537629880401874866217824609283457819451087098
+    /// A second operand for the products
     pub static Y: Scalar52 = Scalar52([
         0x000b75071e1458fa,
         0x000bf9d75e1ecdac,
@@ -395,7 +374,7 @@ mod test {
         0x00000d96018bb825,
     ]);
 
-    /// x*y = 36752150652102274958925982391442301741 mod l
+    /// The product of X and Y modulo l
     pub static XY: Scalar52 = Scalar52([
         0x000ee6d76ba7632d,
         0x000ed50d71d84e02,
@@ -404,7 +383,7 @@ mod test {
         0x0000000000000000,
     ]);
 
-    /// x*y = 658448296334113745583381664921721413881518248721417041768778176391714104386*R mod l in Montgomery form
+    /// The product of X and Y modulo l in Montgomery form
     pub static XY_MONT: Scalar52 = Scalar52([
         0x0006d52bf200cfd5,
         0x00033fb1d7021570,
@@ -413,7 +392,7 @@ mod test {
         0x000007b839c00268,
     ]);
 
-    /// a = 2351415481556538453565687241199399922945659411799870114962672658845158063753
+    /// An operand whose sum with B is zero modulo l
     pub static A: Scalar52 = Scalar52([
         0x0005236c07b3be89,
         0x0001bc3d2a67c0c4,
@@ -422,7 +401,7 @@ mod test {
         0x00000532da9fab8c,
     ]);
 
-    /// b = 4885590095775723760407499321843594317911456947580037491039278279440296187236
+    /// The negation of A modulo l
     pub static B: Scalar52 = Scalar52([
         0x000d3fae55421564,
         0x000c2df24f65a4bc,
@@ -431,8 +410,7 @@ mod test {
         0x00000acd25605473,
     ]);
 
-    /// a+b = 0
-    /// a-b = 4702830963113076907131374482398799845891318823599740229925345317690316127506
+    /// The difference A - B modulo l
     pub static AB: Scalar52 = Scalar52([
         0x000a46d80f677d12,
         0x0003787a54cf8188,
@@ -441,7 +419,7 @@ mod test {
         0x00000a65b53f5718,
     ]);
 
-    // c = (2^512 - 1) % l = 1627715501170711445284395025044413883736156588369414752970002579683115011840
+    /// The value 2^512 - 1 reduced modulo l
     pub static C: Scalar52 = Scalar52([
         0x000611e3449c0f00,
         0x000a768859347a40,
@@ -517,7 +495,7 @@ mod test {
 
     #[test]
     fn from_bytes_wide() {
-        let bignum = [255u8; 64]; // 2^512 - 1
+        let bignum = [255u8; 64];
         let reduced = Scalar52::from_bytes_wide(&bignum);
         for i in 0..5 {
             assert!(reduced[i] == C[i]);

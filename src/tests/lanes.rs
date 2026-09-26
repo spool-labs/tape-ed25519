@@ -1,7 +1,4 @@
-//! The lane verifier against the single one, at every group and tail size
-//!
-//! The lane pipeline is called directly, so these run the lanes on a host that dispatches to the
-//! single verifier. On this machine that is the portable lane kernel.
+//! The lane verifier checked against the single verifier at every group and tail size
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -31,7 +28,7 @@ fn sign_all(messages: &[Vec<u8>]) -> Vec<([u8; 32], Signature, &[u8])> {
     items
 }
 
-/// The lane verdicts and the single verifier's must be equal item for item
+/// Assert the lane verdicts equal the single verifier's item for item
 fn assert_matches_single(items: &[([u8; 32], Signature, &[u8])]) {
     let verdicts = lanes::verify_batch(items);
     assert_eq!(verdicts.len(), items.len());
@@ -99,7 +96,7 @@ fn verdicts_follow_items() {
         .collect();
     let mut items = sign_all(&messages);
 
-    // Every third item is broken, in a different way each time.
+    // Break every third item in a different way each time
     for (index, item) in items.iter_mut().enumerate() {
         let mut bytes = item.1.to_bytes();
         match index % 3 {

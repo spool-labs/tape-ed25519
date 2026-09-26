@@ -1,6 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Scalar multiplication algorithms for the SIMD backends
 
-//! Implementations of various multiplication algorithms for the SIMD backends.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #[allow(missing_docs)]
 pub mod variable_base;

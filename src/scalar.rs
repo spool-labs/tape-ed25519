@@ -1,103 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Scalars modulo the group order l, with the encodings and digit forms the verifier needs
 
-//! Arithmetic on scalars (integers mod the group order).
-//!
-//! Both the Ristretto group and the Ed25519 basepoint have prime order
-//! \\( \ell = 2\^{252} + 27742317777372353535851937790883648493 \\).
-//!
-//! This code is intended to be useful with both the Ristretto group
-//! (where everything is done modulo \\( \ell \\)), and the X/Ed25519
-//! setting, which mandates specific bit-twiddles that are not
-//! well-defined modulo \\( \ell \\).
-//!
-//! All arithmetic on `Scalars` is done modulo \\( \ell \\).
-//!
-//! # Constructing a scalar
-//!
-//! To create a [`Scalar`](struct.Scalar.html) from a supposedly canonical encoding, use
-//! [`Scalar::from_canonical_bytes`](struct.Scalar.html#method.from_canonical_bytes).
-//!
-//! This function does input validation, ensuring that the input bytes
-//! are the canonical encoding of a `Scalar`.
-//! If they are, we'll get
-//! `Some(Scalar)` in return:
-//!
-//! ```
-//! use solana_ed25519::scalar::Scalar;
-//!
-//! let one_as_bytes: [u8; 32] = Scalar::ONE.to_bytes();
-//! let a: Option<Scalar> = Scalar::from_canonical_bytes(one_as_bytes).into();
-//!
-//! assert!(a.is_some());
-//! ```
-//!
-//! However, if we give it bytes representing a scalar larger than \\( \ell \\)
-//! (in this case, \\( \ell + 2 \\)), we'll get `None` back:
-//!
-//! ```
-//! use solana_ed25519::scalar::Scalar;
-//!
-//! let l_plus_two_bytes: [u8; 32] = [
-//!    0xef, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
-//!    0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
-//!    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-//!    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
-//! ];
-//! let a: Option<Scalar> = Scalar::from_canonical_bytes(l_plus_two_bytes).into();
-//!
-//! assert!(a.is_none());
-//! ```
-//!
-//! Another way to create a `Scalar` is by reducing a \\(256\\)-bit integer mod
-//! \\( \ell \\), for which one may use the
-//! [`Scalar::from_bytes_mod_order`](struct.Scalar.html#method.from_bytes_mod_order)
-//! method.  In the case of the second example above, this would reduce the
-//! resultant scalar \\( \mod \ell \\), producing \\( 2 \\):
-//!
-//! ```
-//! use solana_ed25519::scalar::Scalar;
-//!
-//! let l_plus_two_bytes: [u8; 32] = [
-//!    0xef, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
-//!    0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
-//!    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-//!    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
-//! ];
-//! let a: Scalar = Scalar::from_bytes_mod_order(l_plus_two_bytes);
-//!
-//! let two: Scalar = Scalar::ONE + Scalar::ONE;
-//!
-//! assert!(a == two);
-//! ```
-//!
-//! There is also a constructor that reduces a \\(512\\)-bit integer,
-//! [`Scalar::from_bytes_mod_order_wide`].
-//!
-//! To construct a `Scalar` as the hash of some input data, use
-//! [`Scalar::hash_from_bytes`], which takes a buffer, or
-//! [`Scalar::from_hash`], which allows an IUF API.
-//!
-#![doc = "```ignore"]
-//! # fn main() {
-//! use sha2::{Digest, Sha512};
-//! use solana_ed25519::scalar::Scalar;
-//!
-//! // Hashing a single byte slice
-//! let a = Scalar::hash_from_bytes::<Sha512>(b"Abolish ICE");
-//!
-//! // Streaming data into a hash object
-//! let mut hasher = Sha512::default();
-//! hasher.update(b"Abolish ");
-//! hasher.update(b"ICE");
-//! let a2 = Scalar::from_hash(hasher);
-//!
-//! assert_eq!(a, a2);
-//! # }
-//! ```
-//!
-//! See also `Scalar::hash_from_bytes` and `Scalar::from_hash` that
-//! reduces a \\(512\\)-bit integer, if the optional `digest` feature
-//! has been enabled.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 use alloc::vec;
 
@@ -122,62 +25,26 @@ use crate::traits::HEEADecomposition;
 
 pub const NAF_128_SIZE: usize = HEEA_MAX_INDEX + 1;
 
-/// An `UnpackedScalar` represents an element of the field GF(l), optimized for speed.
-///
-/// This is pinned to the 64-bit serial scalar backend.
+/// A scalar held in 52-bit limbs for arithmetic
 type UnpackedScalar = backend::serial::u64::scalar::Scalar52;
 
-/// The `Scalar` struct holds an element of \\(\mathbb Z / \ell\mathbb Z \\).
+/// An integer modulo the group order l, stored as 32 little-endian bytes
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Clone, Copy, Hash)]
 pub struct Scalar {
-    /// `bytes` is a little-endian byte encoding of an integer representing a scalar modulo the
-    /// group order.
-    ///
-    /// # Invariant #1
-    ///
-    /// The integer representing this scalar is less than \\(2\^{255}\\). That is, the most
-    /// significant bit of `bytes[31]` is 0.
-    ///
-    /// This is required for `EdwardsPoint` variable- and fixed-base multiplication, because most
-    /// integers above 2^255 are unrepresentable in our radix-16 NAF (see [`Self::as_radix_16`]).
-    /// The invariant is also required because our `MontgomeryPoint` multiplication assumes the MSB
-    /// is 0 (see `MontgomeryPoint::mul`).
-    ///
-    /// # Invariant #2 (weak)
-    ///
-    /// The integer representing this scalar is less than \\(2\^{255} - 19 \\), i.e., it represents
-    /// a canonical representative of an element of \\( \mathbb Z / \ell\mathbb Z \\). This is
-    /// stronger than invariant #1. It also sometimes has to be broken.
-    ///
-    /// This invariant is deliberately broken in the implementation of `EdwardsPoint::{mul_clamped,
-    /// mul_base_clamped}`, `MontgomeryPoint::{mul_clamped, mul_base_clamped}`, and
-    /// `BasepointTable::mul_base_clamped`. This is not an issue though. As mentioned above,
-    /// scalar-point multiplication is defined for any choice of `bytes` that satisfies invariant
-    /// #1. Since clamping guarantees invariant #1 is satisfied, these operations are well defined.
-    ///
-    /// Note: Scalar-point mult is the _only_ thing you can do safely with an unreduced scalar.
-    /// Scalar-scalar addition and subtraction are NOT correct when using unreduced scalars.
-    /// Multiplication is correct, but this is only due to a quirk of our implementation, and not
-    /// guaranteed to hold in general in the future.
-    ///
-    /// Note: It is not possible to construct an unreduced `Scalar` from the public API unless the
-    /// `legacy_compatibility` is enabled (thus making `Scalar::from_bits` public). Thus, for all
-    /// public non-legacy uses, invariant #2
-    /// always holds.
-    ///
+    /// Below 2^255 always, and below l except in clamped multiplication
     pub bytes: [u8; 32],
 }
 
-/// Limb width of the wide reduction: 252 is nine limbs exactly
+/// Limb width of the wide reduction, which splits 252 bits into nine limbs
 const WIDE_BITS: u32 = 28;
 
 const WIDE_MASK: i64 = (1 << WIDE_BITS) - 1;
 
-/// `L - 2^252` in 28-bit limbs, low first
+/// The value `l - 2^252` in 28-bit limbs, low limb first
 const WIDE_C: [i64; 5] = [0xcf5d3ed, 0x12631a5, 0x79cd658, 0xf9dea2f, 0x14de];
 
-/// Limb `i` of a 64-byte value, 28 bits from bit `28 i`; limb 18 is the last byte
+/// Read 28-bit limb `i` of a 64-byte value, where limb 18 is the last byte alone
 #[inline(always)]
 fn wide_limb(input: &[u8; 64], i: usize) -> i64 {
     if i == 18 {
@@ -194,11 +61,7 @@ fn wide_limb(input: &[u8; 64], i: usize) -> i64 {
     ((word >> (bit % 8)) as i64) & WIDE_MASK
 }
 
-/// A 64-byte value reduced mod L, the ref10 `sc_reduce` fold schedule at
-/// 28-bit limbs as brine-ed25519 PR 25 (L0STE, MIT) re-cut it: `2^252 = -c mod L` folds a limb into the five below it, a
-/// 28 by 28 bit product leaves an i64 room to take several before a carry,
-/// and no branch depends on the data. Rounding carries between the fold
-/// groups, floor carries at the end, the result in `[0, L)`.
+/// Reduce a 64-byte value mod l by folding 28-bit limbs, with no data-dependent branch
 #[inline]
 fn reduce_wide(input: &[u8; 64]) -> [u8; 32] {
     let mut s: [i64; 19] = core::array::from_fn(|i| wide_limb(input, i));
@@ -229,7 +92,7 @@ fn reduce_wide(input: &[u8; 64]) -> [u8; 32] {
         })*};
     }
 
-    // The top five limbs into 5..13, then 5..13 back to 28 bits.
+    // Fold the top five limbs into limbs 5 to 13, then bring those back to 28 bits
     fold!(18);
     fold!(17);
     fold!(16);
@@ -237,8 +100,7 @@ fn reduce_wide(input: &[u8; 64]) -> [u8; 32] {
     fold!(14);
     carry_round!(5, 7, 9, 11, 13, 6, 8, 10, 12);
 
-    // 14..9 into 0..8, then 0..8 back to 28 bits: evens, odds, then the top,
-    // so limb 8 carries only after its carry-in.
+    // Limb 8 propagates last so it sees the overflow from limb 7 first
     fold!(14);
     fold!(13);
     fold!(12);
@@ -247,8 +109,7 @@ fn reduce_wide(input: &[u8; 64]) -> [u8; 32] {
     fold!(9);
     carry_round!(0, 2, 4, 6, 1, 3, 5, 7, 8);
 
-    // Limb 9 is now the sign, in {-1, 0}: fold it away twice with floor
-    // carries, the second adding L exactly when the value went negative.
+    // Limb 9 holds the sign now, and the second fold adds l exactly when the value is negative
     fold!(9);
     carry_floor!(0, 1, 2, 3, 4, 5, 6, 7, 8);
     fold!(9);
@@ -269,41 +130,31 @@ fn reduce_wide(input: &[u8; 64]) -> [u8; 32] {
 }
 
 impl Scalar {
-    /// Construct a `Scalar` by reducing a 256-bit little-endian integer
-    /// modulo the group order \\( \ell \\).
+    /// Reduce a 256-bit little-endian integer modulo l
     pub fn from_bytes_mod_order(bytes: [u8; 32]) -> Scalar {
-        // Temporarily allow s_unreduced.bytes > 2^255 ...
         let s_unreduced = Scalar { bytes };
 
-        // Then reduce mod the group order and return the reduced representative.
         let s = s_unreduced.reduce();
         debug_assert_eq!(0u8, s[31] >> 7);
 
         s
     }
 
-    /// Construct a `Scalar` by reducing a 512-bit little-endian integer
-    /// modulo the group order \\( \ell \\).
+    /// Reduce a 512-bit little-endian integer modulo l
     pub fn from_bytes_mod_order_wide(input: &[u8; 64]) -> Scalar {
         Scalar {
             bytes: reduce_wide(input),
         }
     }
 
-    /// Attempt to construct a `Scalar` from a canonical byte representation.
-    ///
-    /// # Return
-    ///
-    /// - `Some(s)`, where `s` is the `Scalar` corresponding to `bytes`,
-    ///   if `bytes` is a canonical byte representation modulo the group order \\( \ell \\);
-    /// - `None` if `bytes` is not a canonical byte representation.
+    /// Decode 32 bytes as a scalar, which is none unless the bytes are below l
     pub fn from_canonical_bytes(bytes: [u8; 32]) -> CtOption<Scalar> {
         let high_bit_unset = (bytes[31] >> 7).ct_eq(&0);
         let candidate = Scalar { bytes };
         CtOption::new(candidate, high_bit_unset & candidate.is_canonical())
     }
 
-    /// Construct a `Scalar` from bytes that are known to be canonical.
+    /// Wrap bytes the caller knows are below l
     #[inline]
     pub const fn from_canonical_bytes_unchecked(bytes: [u8; 32]) -> Scalar {
         Scalar { bytes }
@@ -332,7 +183,7 @@ impl ConstantTimeEq for Scalar {
 impl Index<usize> for Scalar {
     type Output = u8;
 
-    /// Index the bytes of the representative for this `Scalar`.  Mutation is not permitted.
+    /// Read one byte of the encoding
     fn index(&self, _index: usize) -> &u8 {
         &(self.bytes[_index])
     }
@@ -367,8 +218,6 @@ impl Add<&Scalar> for &Scalar {
     type Output = Scalar;
     #[allow(non_snake_case)]
     fn add(self, _rhs: &Scalar) -> Scalar {
-        // The UnpackedScalar::add function produces reduced outputs if the inputs are reduced. By
-        // Scalar invariant #1, this is always the case.
         UnpackedScalar::add(&self.unpack(), &_rhs.unpack()).pack()
     }
 }
@@ -387,8 +236,6 @@ impl Sub<&Scalar> for &Scalar {
     type Output = Scalar;
     #[allow(non_snake_case)]
     fn sub(self, rhs: &Scalar) -> Scalar {
-        // The UnpackedScalar::sub function produces reduced outputs if the inputs are reduced. By
-        // Scalar invariant #1, this is always the case.
         UnpackedScalar::sub(&self.unpack(), &rhs.unpack()).pack()
     }
 }
@@ -485,27 +332,6 @@ impl From<u32> for Scalar {
 }
 
 impl From<u64> for Scalar {
-    /// Construct a scalar from the given `u64`.
-    ///
-    /// # Inputs
-    ///
-    /// An `u64` to convert to a `Scalar`.
-    ///
-    /// # Returns
-    ///
-    /// A `Scalar` corresponding to the input `u64`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use solana_ed25519::scalar::Scalar;
-    ///
-    /// let fourtytwo = Scalar::from(42u64);
-    /// let six = Scalar::from(6u64);
-    /// let seven = Scalar::from(7u64);
-    ///
-    /// assert!(fourtytwo == six * seven);
-    /// ```
     fn from(x: u64) -> Scalar {
         let mut s_bytes = [0u8; 32];
         let x_bytes = x.to_le_bytes();
@@ -530,23 +356,13 @@ impl From<&Scalar> for I256 {
 }
 
 impl HEEADecomposition for Scalar {
-    /// Generate approximately half-size non-negative scalars `(rho, tau)` for a
-    /// given challenge scalar `h`.
-    ///
-    /// The signed HEEA output satisfies `rho_i = tau_i * h (mod ell)`. This
-    /// method returns the absolute values of `rho_i` and `tau_i`, plus `flip_h`
-    /// to record whether exactly one of the signed values was negative.
-    ///
-    /// If `flip_h` is false, then `rho = tau * h (mod ell)`. If `flip_h` is
-    /// true, then `rho = -tau * h (mod ell)`.
+    /// Split the challenge into half-size `rho` and `tau` with `rho = tau h` when the flag is false and `rho = -tau h` when true
     fn heea_decompose(&self) -> (Scalar, Scalar, bool) {
-        // Convert h to I256
         let v = self.into();
 
-        // Run the algorithm
         let (mut rho_i, mut tau_i) = curve25519_heea_vartime_lehmer(v);
 
-        // Convert back to Scalars and ensure shortness
+        // Both values go back as magnitudes and each negative sign flips h once
         let mut flip_h = false;
         if rho_i < I256::ZERO {
             rho_i = -rho_i;
@@ -565,10 +381,10 @@ impl HEEADecomposition for Scalar {
 }
 
 impl Scalar {
-    /// The scalar \\( 0 \\).
+    /// The scalar zero
     pub const ZERO: Self = Self { bytes: [0u8; 32] };
 
-    /// The scalar \\( 1 \\).
+    /// The scalar one
     pub const ONE: Self = Self {
         bytes: [
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -576,73 +392,17 @@ impl Scalar {
         ],
     };
 
-    /// Convert this `Scalar` to its underlying sequence of bytes.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use solana_ed25519::scalar::Scalar;
-    ///
-    /// let s: Scalar = Scalar::ZERO;
-    ///
-    /// assert!(s.to_bytes() == [0u8; 32]);
-    /// ```
+    /// Copy out the 32-byte little-endian encoding
     pub const fn to_bytes(self) -> [u8; 32] {
         self.bytes
     }
 
-    /// View the little-endian byte encoding of the integer representing this Scalar.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use solana_ed25519::scalar::Scalar;
-    ///
-    /// let s: Scalar = Scalar::ZERO;
-    ///
-    /// assert!(s.as_bytes() == &[0u8; 32]);
-    /// ```
+    /// Borrow the 32-byte little-endian encoding
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.bytes
     }
 
-    /// Given a nonzero `Scalar`, compute its multiplicative inverse.
-    ///
-    /// # Warning
-    ///
-    /// `self` **MUST** be nonzero.  If you cannot
-    /// *prove* that this is the case, you **SHOULD NOT USE THIS
-    /// FUNCTION**.
-    ///
-    /// # Returns
-    ///
-    /// The multiplicative inverse of the this `Scalar`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use solana_ed25519::scalar::Scalar;
-    ///
-    /// // x = 2238329342913194256032495932344128051776374960164957527413114840482143558222
-    /// let X: Scalar = Scalar::from_bytes_mod_order([
-    ///         0x4e, 0x5a, 0xb4, 0x34, 0x5d, 0x47, 0x08, 0x84,
-    ///         0x59, 0x13, 0xb4, 0x64, 0x1b, 0xc2, 0x7d, 0x52,
-    ///         0x52, 0xa5, 0x85, 0x10, 0x1b, 0xcc, 0x42, 0x44,
-    ///         0xd4, 0x49, 0xf4, 0xa8, 0x79, 0xd9, 0xf2, 0x04,
-    ///     ]);
-    /// // 1/x = 6859937278830797291664592131120606308688036382723378951768035303146619657244
-    /// let XINV: Scalar = Scalar::from_bytes_mod_order([
-    ///         0x1c, 0xdc, 0x17, 0xfc, 0xe0, 0xe9, 0xa5, 0xbb,
-    ///         0xd9, 0x24, 0x7e, 0x56, 0xbb, 0x01, 0x63, 0x47,
-    ///         0xbb, 0xba, 0x31, 0xed, 0xd5, 0xa9, 0xbb, 0x96,
-    ///         0xd5, 0x0b, 0xcd, 0x7a, 0x3f, 0x96, 0x2a, 0x0f,
-    ///     ]);
-    ///
-    /// let inv_X: Scalar = X.invert();
-    /// assert!(XINV == inv_X);
-    /// let should_be_one: Scalar = &inv_X * &X;
-    /// assert!(should_be_one == Scalar::ONE);
-    /// ```
+    /// Compute the multiplicative inverse of a nonzero scalar
     pub fn invert(&self) -> Scalar {
         #[allow(unused_mut)]
         let mut unpacked = self.unpack();
@@ -652,42 +412,7 @@ impl Scalar {
         inverse.pack()
     }
 
-    /// Given a slice of nonzero (possibly secret) `Scalar`s,
-    /// compute their inverses in a batch.
-    ///
-    /// # Return
-    ///
-    /// Each element of `inputs` is replaced by its inverse.
-    ///
-    /// The product of all inverses is returned.
-    ///
-    /// # Warning
-    ///
-    /// All input `Scalars` **MUST** be nonzero.  If you cannot
-    /// *prove* that this is the case, you **SHOULD NOT USE THIS
-    /// FUNCTION**.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use solana_ed25519::scalar::Scalar;
-    /// # fn main() {
-    /// let mut scalars = [
-    ///     Scalar::from(3u64),
-    ///     Scalar::from(5u64),
-    ///     Scalar::from(7u64),
-    ///     Scalar::from(11u64),
-    /// ];
-    ///
-    /// let allinv = Scalar::invert_batch(&mut scalars);
-    ///
-    /// assert_eq!(allinv, Scalar::from(3*5*7*11u64).invert());
-    /// assert_eq!(scalars[0], Scalar::from(3u64).invert());
-    /// assert_eq!(scalars[1], Scalar::from(5u64).invert());
-    /// assert_eq!(scalars[2], Scalar::from(7u64).invert());
-    /// assert_eq!(scalars[3], Scalar::from(11u64).invert());
-    /// # }
-    /// ```
+    /// Invert every nonzero scalar in place and return the inverse of their product
     pub fn invert_batch<const COUNT: usize>(inputs: &mut [Scalar; COUNT]) -> Scalar {
         let one: UnpackedScalar = Scalar::ONE.unpack().as_montgomery();
 
@@ -696,20 +421,7 @@ impl Scalar {
         Self::invert_batch_internal(inputs, &mut scratch)
     }
 
-    /// Given a slice of nonzero (possibly secret) `Scalar`s, compute their inverses in a batch.
-    /// This the allocating form of [`Self::invert_batch`]. See those docs for examples.
-    ///
-    /// # Return
-    ///
-    /// Each element of `inputs` is replaced by its inverse.
-    ///
-    /// The product of all inverses is returned.
-    ///
-    /// # Warning
-    ///
-    /// All input `Scalars` **MUST** be nonzero.  If you cannot
-    /// *prove* that this is the case, you **SHOULD NOT USE THIS
-    /// FUNCTION**.
+    /// Invert a slice of nonzero scalars in place and return the inverse of their product
     pub fn invert_batch_alloc(inputs: &mut [Scalar]) -> Scalar {
         let n = inputs.len();
         let one: UnpackedScalar = Scalar::ONE.unpack().as_montgomery();
@@ -720,39 +432,23 @@ impl Scalar {
     }
 
     fn invert_batch_internal(inputs: &mut [Scalar], scratch: &mut [UnpackedScalar]) -> Scalar {
-        // This code is essentially identical to the FieldElement
-        // implementation, and is documented there.  Unfortunately,
-        // it's not easy to write it generically, since here we want
-        // to use `UnpackedScalar`s internally, and `Scalar`s
-        // externally, but there's no corresponding distinction for
-        // field elements.
-
-        // Keep an accumulator of all of the previous products
+        // Inputs stay in Montgomery form so the backward pass needs no conversion
         let mut acc = Scalar::ONE.unpack().as_montgomery();
 
-        // Pass through the input vector, recording the previous
-        // products in the scratch space
         for (input, scratch) in inputs.iter_mut().zip(scratch.iter_mut()) {
             *scratch = acc;
 
-            // Avoid unnecessary Montgomery multiplication in second pass by
-            // keeping inputs in Montgomery form
             let tmp = input.unpack().as_montgomery();
             *input = tmp.pack();
             acc = UnpackedScalar::montgomery_mul(&acc, &tmp);
         }
 
-        // acc is nonzero iff all inputs are nonzero
         debug_assert!(acc.pack() != Scalar::ZERO);
 
-        // Compute the inverse of all products
         acc = acc.montgomery_invert().from_montgomery();
 
-        // We need to return the product of all inverses later
         let ret = acc.pack();
 
-        // Pass through the vector backwards to compute the inverses
-        // in place
         for (input, scratch) in inputs.iter_mut().rev().zip(scratch.iter().rev()) {
             let tmp = UnpackedScalar::montgomery_mul(&acc, &input.unpack());
             *input = UnpackedScalar::montgomery_mul(&acc, scratch).pack();
@@ -762,12 +458,9 @@ impl Scalar {
         ret
     }
 
-    /// Compute `b` such that `b + b = a mod modulus`.
+    /// Compute `b` with `b + b = a mod l`
     pub fn div_by_2(&self) -> Self {
-        // We are looking for such `b` that `b + b = a mod modulus`.
-        // Two possibilities:
-        // - if `a` is even, we can just divide by 2;
-        // - if `a` is odd, we divide `(a + modulus)` by 2.
+        // An odd value gains l first so the halving is exact
         let is_odd = Choice::from(self.as_bytes()[0] & 1);
         let mut scalar = self.unpack();
         scalar.conditional_add_l(is_odd);
@@ -778,92 +471,15 @@ impl Scalar {
         scalar.pack()
     }
 
-    /// Get the bits of the scalar, in little-endian order
+    /// Iterate the 256 bits of the scalar, low bit first
     pub fn bits_le(&self) -> impl DoubleEndedIterator<Item = bool> + '_ {
-        (0..256).map(|i| {
-            // As i runs from 0..256, the bottom 3 bits index the bit, while the upper bits index
-            // the byte. Since self.bytes is little-endian at the byte level, this iterator is
-            // little-endian on the bit level
-            ((self.bytes[i >> 3] >> (i & 7)) & 1u8) == 1
-        })
+        (0..256).map(|i| ((self.bytes[i >> 3] >> (i & 7)) & 1u8) == 1)
     }
 
-    /// Compute a width-\\(w\\) "Non-Adjacent Form" of this scalar.
-    ///
-    /// A width-\\(w\\) NAF of a positive integer \\(k\\) is an expression
-    /// $$
-    /// k = \sum_{i=0}\^m n\_i 2\^i,
-    /// $$
-    /// where each nonzero
-    /// coefficient \\(n\_i\\) is odd and bounded by \\(|n\_i| < 2\^{w-1}\\),
-    /// \\(n\_{m-1}\\) is nonzero, and at most one of any \\(w\\) consecutive
-    /// coefficients is nonzero.  (Hankerson, Menezes, Vanstone; def 3.32).
-    ///
-    /// The length of the NAF is at most one more than the length of
-    /// the binary representation of \\(k\\).  This is why the
-    /// `Scalar` type maintains an invariant (invariant #1) that the top bit is
-    /// \\(0\\), so that the NAF of a scalar has at most 256 digits.
-    ///
-    /// Intuitively, this is like a binary expansion, except that we
-    /// allow some coefficients to grow in magnitude up to
-    /// \\(2\^{w-1}\\) so that the nonzero coefficients are as sparse
-    /// as possible.
-    ///
-    /// When doing scalar multiplication, we can then use a lookup
-    /// table of precomputed multiples of a point to add the nonzero
-    /// terms \\( k_i P \\).  Using signed digits cuts the table size
-    /// in half, and using odd digits cuts the table size in half
-    /// again.
-    ///
-    /// To compute a \\(w\\)-NAF, we use a modification of Algorithm 3.35 of HMV:
-    ///
-    /// 1. \\( i \gets 0 \\)
-    /// 2. While \\( k \ge 1 \\):
-    ///     1. If \\(k\\) is odd, \\( n_i \gets k \operatorname{mods} 2^w \\), \\( k \gets k - n_i \\).
-    ///     2. If \\(k\\) is even, \\( n_i \gets 0 \\).
-    ///     3. \\( k \gets k / 2 \\), \\( i \gets i + 1 \\).
-    /// 3. Return \\( n_0, n_1, ... , \\)
-    ///
-    /// Here \\( \bar x = x \operatorname{mods} 2^w \\) means the
-    /// \\( \bar x \\) with \\( \bar x \equiv x \pmod{2^w} \\) and
-    /// \\( -2^{w-1} \leq \bar x < 2^{w-1} \\).
-    ///
-    /// We implement this by scanning across the bits of \\(k\\) from
-    /// least-significant bit to most-significant-bit.
-    /// Write the bits of \\(k\\) as
-    /// $$
-    /// k = \sum\_{i=0}\^m k\_i 2^i,
-    /// $$
-    /// and split the sum as
-    /// $$
-    /// k = \sum\_{i=0}^{w-1} k\_i 2^i + 2^w \sum\_{i=0} k\_{i+w} 2^i
-    /// $$
-    /// where the first part is \\( k \mod 2^w \\).
-    ///
-    /// If \\( k \mod 2^w\\) is odd, and \\( k \mod 2^w < 2^{w-1} \\), then we emit
-    /// \\( n_0 = k \mod 2^w \\).  Instead of computing
-    /// \\( k - n_0 \\), we just advance \\(w\\) bits and reindex.
-    ///
-    /// If \\( k \mod 2^w\\) is odd, and \\( k \mod 2^w \ge 2^{w-1} \\), then
-    /// \\( n_0 = k \operatorname{mods} 2^w = k \mod 2^w - 2^w \\).
-    /// The quantity \\( k - n_0 \\) is
-    /// $$
-    /// \begin{aligned}
-    /// k - n_0 &= \sum\_{i=0}^{w-1} k\_i 2^i + 2^w \sum\_{i=0} k\_{i+w} 2^i
-    ///          - \sum\_{i=0}^{w-1} k\_i 2^i + 2^w \\\\
-    /// &= 2^w + 2^w \sum\_{i=0} k\_{i+w} 2^i
-    /// \end{aligned}
-    /// $$
-    /// so instead of computing the subtraction, we can set a carry
-    /// bit, advance \\(w\\) bits, and reindex.
-    ///
-    /// If \\( k \mod 2^w\\) is even, we emit \\(0\\), advance 1 bit
-    /// and reindex.  In fact, by setting all digits to \\(0\\)
-    /// initially, we don't need to emit anything.
+    /// Compute the width-`w` non-adjacent form, odd digits below `2^(w-1)` in magnitude with at most one nonzero in any `w` in a row
     pub fn non_adjacent_form(&self, w: usize) -> [i8; 256] {
-        // required by the NAF definition
         debug_assert!(w >= 2);
-        // required so that the NAF digits fit in i8
+        // Wider windows give digits that do not fit in i8
         debug_assert!(w <= 8);
 
         let mut naf = [0i8; 256];
@@ -877,25 +493,18 @@ impl Scalar {
         let mut pos = 0;
         let mut carry = 0;
         while pos < 256 {
-            // Construct a buffer of bits of the scalar, starting at bit `pos`
             let u64_idx = pos / 64;
             let bit_idx = pos % 64;
             let bit_buf: u64 = if bit_idx < 64 - w {
-                // This window's bits are contained in a single u64
                 x_u64[u64_idx] >> bit_idx
             } else {
-                // Combine the current u64's bits with the bits from the next u64
                 (x_u64[u64_idx] >> bit_idx) | (x_u64[1 + u64_idx] << (64 - bit_idx))
             };
 
-            // Add the carry into the current window
             let window = carry + (bit_buf & window_mask);
 
             if window & 1 == 0 {
-                // If the window value is even, preserve the carry and continue.
-                // Why is the carry preserved?
-                // If carry == 0 and window & 1 == 0, then the next carry should be 0
-                // If carry == 1 and window & 1 == 0, then bit_buf & 1 == 1 so the next carry should be 1
+                // An even window leaves the pending overflow bit for the next position
                 pos += 1;
                 continue;
             }
@@ -914,11 +523,9 @@ impl Scalar {
         naf
     }
 
-    /// Compute a width-\\(w\\) non-adjacent form for scalars known to fit in 128 bits.
+    /// Compute the width-`w` non-adjacent form of a scalar below 2^128
     pub fn non_adjacent_form_128(&self, w: usize) -> [i8; NAF_128_SIZE] {
-        // required by the NAF definition
         debug_assert!(w >= 2);
-        // required so that the NAF digits fit in i8
         debug_assert!(w <= 8);
         debug_assert!(self.bytes[16..32].iter().all(|&b| b == 0));
 
@@ -963,22 +570,11 @@ impl Scalar {
         naf
     }
 
-    /// Write this scalar in radix 16, with coefficients in \\([-8,8)\\),
-    /// i.e., compute \\(a\_i\\) such that
-    /// $$
-    ///    a = a\_0 + a\_1 16\^1 + \cdots + a_{63} 16\^{63},
-    /// $$
-    /// with \\(-8 \leq a_i < 8\\) for \\(0 \leq i < 63\\) and \\(-8 \leq a_{63} \leq 8\\).
-    ///
-    /// The largest value that can be decomposed like this is just over \\(2^{255}\\). Thus, in
-    /// order to not error, the top bit MUST NOT be set, i.e., `Self` MUST be less than
-    /// \\(2^{255}\\).
+    /// Write the scalar as 64 signed radix-16 digits in -8..8, the top digit up to 8, for a scalar below 2^255
     pub fn as_radix_16(&self) -> [i8; 64] {
         debug_assert!(self[31] <= 127);
         let mut output = [0i8; 64];
 
-        // Step 1: change radix.
-        // Convert from radix 256 (bytes) to radix 16 (nibbles)
         #[allow(clippy::identity_op)]
         #[inline(always)]
         fn bot_half(x: u8) -> u8 {
@@ -993,22 +589,19 @@ impl Scalar {
             output[2 * i] = bot_half(self[i]) as i8;
             output[2 * i + 1] = top_half(self[i]) as i8;
         }
-        // Precondition note: since self[31] <= 127, output[63] <= 7
 
-        // Step 2: recenter coefficients from [0,16) to [-8,8)
+        // Recenter each digit from 0..16 to -8..8
         for i in 0..63 {
             let carry = (output[i] + 8) >> 4;
             output[i] -= carry << 4;
             output[i + 1] += carry;
         }
-        // Precondition note: output[63] is not recentered.  It
-        // increases by carry <= 1.  Thus output[63] <= 8.
+        // The top digit starts at 7 or less and gains at most one, so it stays at 8 or less
 
         output
     }
 
-    /// Returns a size hint indicating how many entries of the return
-    /// value of `to_radix_2w` are nonzero.
+    /// Count the digits `as_radix_2w` can make nonzero for width `w`
     #[cfg(test)]
     pub fn to_radix_2w_size_hint(w: usize) -> usize {
         debug_assert!(w >= 4);
@@ -1016,7 +609,6 @@ impl Scalar {
 
         let digits_count = match w {
             4..=7 => 256_usize.div_ceil(w),
-            // See comment in to_radix_2w on handling the terminal carry.
             8 => 256_usize.div_ceil(w) + 1_usize,
             0..=3 | 9.. => panic!("invalid radix parameter"),
         };
@@ -1025,27 +617,7 @@ impl Scalar {
         digits_count
     }
 
-    /// Creates a representation of a Scalar in radix \\( 2^w \\) with \\(w = 4, 5, 6, 7, 8\\) for
-    /// use with the Pippenger algorithm. Higher radixes are not supported to save cache space.
-    /// Radix 256 is near-optimal even for very large inputs.
-    ///
-    /// Radix below 16 or above 256 is prohibited.
-    /// This method returns digits in a fixed-sized array, excess digits are zeroes.
-    ///
-    /// For radix 16, `Self` must be less than \\(2^{255}\\). This is because most integers larger
-    /// than \\(2^{255}\\) are unrepresentable in the form described below for \\(w = 4\\). This
-    /// would be true for \\(w = 8\\) as well, but it is compensated for by increasing the size
-    /// hint by 1.
-    ///
-    /// ## Scalar representation
-    ///
-    /// Radix \\(2\^w\\), with \\(n = ceil(256/w)\\) coefficients in \\([-(2\^w)/2,(2\^w)/2)\\),
-    /// i.e., scalar is represented using digits \\(a\_i\\) such that
-    /// $$
-    ///    a = a\_0 + a\_1 2\^1w + \cdots + a_{n-1} 2\^{w*(n-1)},
-    /// $$
-    /// with \\(-2\^w/2 \leq a_i < 2\^w/2\\) for \\(0 \leq i < (n-1)\\) and \\(-2\^w/2 \leq a_{n-1} \leq 2\^w/2\\).
-    ///
+    /// Write the scalar in signed radix `2^w` digits for `w` from 4 to 8
     pub fn as_radix_2w(&self, w: usize) -> [i8; 64] {
         debug_assert!(w >= 4);
         debug_assert!(w <= 8);
@@ -1054,7 +626,6 @@ impl Scalar {
             return self.as_radix_16();
         }
 
-        // Scalar formatted as four `u64`s with carry bit packed into the highest bit.
         let mut scalar64x4 = [0u64; 4];
         read_le_u64_into(&self.bytes, &mut scalar64x4[0..4]);
 
@@ -1066,37 +637,24 @@ impl Scalar {
         let digits_count = 256_usize.div_ceil(w);
         #[allow(clippy::needless_range_loop)]
         for i in 0..digits_count {
-            // Construct a buffer of bits of the scalar, starting at `bit_offset`.
             let bit_offset = i * w;
             let u64_idx = bit_offset / 64;
             let bit_idx = bit_offset % 64;
 
-            // Read the bits from the scalar
             let bit_buf: u64 = if bit_idx < 64 - w || u64_idx == 3 {
-                // This window's bits are contained in a single u64,
-                // or it's the last u64 anyway.
                 scalar64x4[u64_idx] >> bit_idx
             } else {
-                // Combine the current u64's bits with the bits from the next u64
                 (scalar64x4[u64_idx] >> bit_idx) | (scalar64x4[1 + u64_idx] << (64 - bit_idx))
             };
 
-            // Read the actual coefficient value from the window
-            let coef = carry + (bit_buf & window_mask); // coef = [0, 2^r)
+            let coef = carry + (bit_buf & window_mask);
 
-            // Recenter coefficients from [0,2^w) to [-2^w/2, 2^w/2)
+            // Recenter the digit from 0..2^w to -2^(w-1)..2^(w-1)
             carry = (coef + (radix / 2)) >> w;
             digits[i] = ((coef as i64) - (carry << w) as i64) as i8;
         }
 
-        // When 4 < w < 8, we can fold the final carry onto the last digit d,
-        // because d < 2^w/2 so d + carry*2^w = d + 1*2^w < 2^(w+1) < 2^8.
-        //
-        // When w = 8, we can't fit carry*2^w into an i8.  This should
-        // not happen anyways, because the final carry will be 0 for
-        // reduced scalars, but Scalar invariant #1 allows 255-bit scalars.
-        // To handle this, we expand the size_hint by 1 when w=8,
-        // and accumulate the final carry onto another digit.
+        // An i8 cannot hold the top overflow shifted by 8, so width 8 puts it in an extra digit
         match w {
             8 => digits[digits_count] += carry as i8,
             0..=7 | 9.. => digits[digits_count - 1] += (carry << w) as i8,
@@ -1105,13 +663,12 @@ impl Scalar {
         digits
     }
 
-    /// Unpack this `Scalar` to an `UnpackedScalar` for faster arithmetic.
+    /// Unpack the scalar into 52-bit limbs
     pub fn unpack(&self) -> UnpackedScalar {
         UnpackedScalar::from_bytes(&self.bytes)
     }
 
-    /// Create a `Scalar` from a positive `I256`.
-    /// The caller must ensure val > 0.
+    /// Convert a non-negative `I256` to a scalar
     pub fn from_positive_i256(val: &I256) -> Self {
         debug_assert!(val >= &I256::ZERO);
         Scalar {
@@ -1119,7 +676,7 @@ impl Scalar {
         }
     }
 
-    /// Reduce this `Scalar` modulo \\(\ell\\).
+    /// Reduce the scalar modulo l
     #[allow(non_snake_case)]
     fn reduce(&self) -> Scalar {
         #[allow(unused_mut)]
@@ -1132,28 +689,25 @@ impl Scalar {
         x_mod_l.pack()
     }
 
-    /// Check whether this `Scalar` is the canonical representative mod \\(\ell\\). This is not
-    /// public because any `Scalar` that is publicly observed is reduced, by scalar invariant #2.
+    /// Check whether the scalar is already below l
     fn is_canonical(&self) -> Choice {
         self.ct_eq(&self.reduce())
     }
 }
 
 impl UnpackedScalar {
-    /// Pack the limbs of this `UnpackedScalar` into a `Scalar`.
+    /// Pack the limbs back into a 32-byte scalar
     fn pack(&self) -> Scalar {
         Scalar {
             bytes: self.to_bytes(),
         }
     }
 
-    /// Inverts an UnpackedScalar in Montgomery form.
-    #[rustfmt::skip] // keep alignment of addition chain and squarings
+    /// Invert a scalar in Montgomery form with a fixed addition chain
+    #[rustfmt::skip]
     #[allow(unused_mut)]
     #[allow(clippy::just_underscores_and_digits)]
     pub fn montgomery_invert(&self) -> UnpackedScalar {
-        // Uses the addition chain from
-        // https://briansmith.org/ecc-inversion-addition-chains-01#curve25519_scalar_inversion
         let mut    _1 = *self;
         let mut   _10 = _1.montgomery_square();
         let mut  _100 = _10.montgomery_square();
@@ -1164,7 +718,6 @@ impl UnpackedScalar {
         let mut _1011 = UnpackedScalar::montgomery_mul(&_10,  &_1001);
         let mut _1111 = UnpackedScalar::montgomery_mul(&_100, &_1011);
 
-        // _10000
         let mut y = UnpackedScalar::montgomery_mul(&_1111, &_1);
 
         #[inline]
@@ -1203,13 +756,10 @@ impl UnpackedScalar {
         square_multiply(&mut y,       3, &_101);
         square_multiply(&mut y,   1 + 2, &_11);
 
-
-
-
         y
     }
 
-    /// Inverts an UnpackedScalar not in Montgomery form.
+    /// Invert a scalar in plain form
     pub fn invert(&self) -> UnpackedScalar {
         #[allow(unused_mut)]
         let mut montgomery = self.as_montgomery();
@@ -1229,25 +779,7 @@ fn read_le_u64_into(source: &[u8], destination: &mut [u64]) {
     }
 }
 
-/// _Clamps_ the given little-endian representation of a 32-byte integer. Clamping the value puts
-/// it in the range:
-///
-/// **n ∈ 2^254 + 8\*{0, 1, 2, 3, . . ., 2^251 − 1}**
-///
-/// # Explanation of clamping
-///
-/// For Curve25519, h = 8, and multiplying by 8 is the same as a binary left-shift by 3 bits.
-/// If you take a secret scalar value between 2^251 and 2^252 – 1 and left-shift by 3 bits
-/// then you end up with a 255-bit number with the most significant bit set to 1 and
-/// the least-significant three bits set to 0.
-///
-/// The Curve25519 clamping operation takes **an arbitrary 256-bit random value** and
-/// clears the most-significant bit (making it a 255-bit number), sets the next bit, and then
-/// clears the 3 least-significant bits. In other words, it directly creates a scalar value that is
-/// in the right form and pre-multiplied by the cofactor.
-///
-/// See [here](https://neilmadden.blog/2020/05/28/whats-the-curve25519-clamping-all-about/) for
-/// more details.
+/// Clamp 32 bytes to a multiple of the cofactor with bit 254 set and bit 255 clear
 #[must_use]
 pub const fn clamp_integer(mut bytes: [u8; 32]) -> [u8; 32] {
     bytes[0] &= 0b1111_1000;
@@ -1288,11 +820,7 @@ pub mod test {
         ],
     };
 
-    /// The largest scalar that satisfies invariant #1, i.e., the largest scalar with the top bit
-    /// set to 0. Since this scalar violates invariant #2, i.e., it's greater than the modulus `l`,
-    /// addition and subtraction are broken. The only thing you can do with this is scalar-point
-    /// multiplication (and actually also scalar-scalar multiplication, but that's just a quirk of
-    /// our implementation).
+    /// The largest scalar with the top bit clear, which is above l and only fit for point multiplication
     pub static LARGEST_UNREDUCED_SCALAR: Scalar = Scalar {
         bytes: [
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -1310,9 +838,7 @@ pub mod test {
         ],
     };
 
-    /// sage: l = 2^252 + 27742317777372353535851937790883648493
-    /// sage: big = 2^256 - 1
-    /// sage: repr((big % l).digits(256))
+    /// The value 2^256 - 1 reduced mod l
     static CANONICAL_2_256_MINUS_1: Scalar = Scalar {
         bytes: [
             28, 149, 152, 141, 116, 49, 236, 214, 112, 207, 125, 115, 244, 91, 239, 198, 254, 255,
@@ -1353,17 +879,17 @@ pub mod test {
 
     #[test]
     fn fuzzer_testcase_reduction() {
-        // LE bytes of 24519928653854221733733552434404946937899825954937634815
+        // Little-endian bytes of 24519928653854221733733552434404946937899825954937634815
         let a_bytes = [
             255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
             255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
-        // LE bytes of 4975441334397345751130612518500927154628011511324180036903450236863266160640
+        // Little-endian bytes of 4975441334397345751130612518500927154628011511324180036903450236863266160640
         let b_bytes = [
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 210, 210,
             210, 255, 255, 255, 255, 10,
         ];
-        // LE bytes of 6432735165214683820902750800207468552549813371247423777071615116673864412038
+        // Little-endian bytes of 6432735165214683820902750800207468552549813371247423777071615116673864412038
         let c_bytes = [
             134, 171, 119, 216, 180, 128, 178, 62, 171, 132, 32, 62, 34, 119, 104, 193, 47, 215,
             181, 250, 14, 207, 172, 93, 75, 207, 211, 103, 144, 204, 56, 14,
@@ -1375,11 +901,9 @@ pub mod test {
 
         let mut tmp = [0u8; 64];
 
-        // also_a = (a mod l)
         tmp[0..32].copy_from_slice(&a_bytes[..]);
         let also_a = Scalar::from_bytes_mod_order_wide(&tmp);
 
-        // also_b = (b mod l)
         tmp[0..32].copy_from_slice(&b_bytes[..]);
         let also_b = Scalar::from_bytes_mod_order_wide(&tmp);
 
@@ -1456,13 +980,11 @@ pub mod test {
 
     #[test]
     fn add_reduces() {
-        // Check that addition wraps around the modulus
         assert_eq!(BASEPOINT_ORDER_MINUS_ONE + Scalar::ONE, Scalar::ZERO);
     }
 
     #[test]
     fn sub_reduces() {
-        // Check that subtraction wraps around the modulus
         assert_eq!(Scalar::ZERO - Scalar::ONE, BASEPOINT_ORDER_MINUS_ONE);
     }
 
@@ -1484,21 +1006,17 @@ pub mod test {
     #[allow(non_snake_case)]
     #[test]
     fn impl_product() {
-        // Test that product works for non-empty iterators
         let X_Y_vector = [X, Y];
         let should_be_X_times_Y: Scalar = X_Y_vector.iter().product();
         assert_eq!(should_be_X_times_Y, X_TIMES_Y);
 
-        // Test that product works for the empty iterator
         let one = Scalar::ONE;
         let empty_vector = [];
         let should_be_one: Scalar = empty_vector.iter().product();
         assert_eq!(should_be_one, one);
 
-        // Test that product works for iterators where Item = Scalar
         let xs = [Scalar::from(2u64); 10];
         let ys = [Scalar::from(3u64); 10];
-        // now zs is an iterator with Item = Scalar
         let zs = xs.iter().zip(ys.iter()).map(|(x, y)| x * y);
 
         let x_prod: Scalar = xs.iter().product();
@@ -1513,22 +1031,18 @@ pub mod test {
 
     #[test]
     fn impl_sum() {
-        // Test that sum works for non-empty iterators
         let two = Scalar::from(2u64);
         let one_vector = [Scalar::ONE, Scalar::ONE];
         let should_be_two: Scalar = one_vector.iter().sum();
         assert_eq!(should_be_two, two);
 
-        // Test that sum works for the empty iterator
         let zero = Scalar::ZERO;
         let empty_vector = [];
         let should_be_zero: Scalar = empty_vector.iter().sum();
         assert_eq!(should_be_zero, zero);
 
-        // Test that sum works for owned types
         let xs = [Scalar::from(1u64); 10];
         let ys = [Scalar::from(2u64); 10];
-        // now zs is an iterator with Item = Scalar
         let zs = xs.iter().zip(ys.iter()).map(|(x, y)| x + y);
 
         let x_sum: Scalar = xs.iter().sum();
@@ -1552,14 +1066,12 @@ pub mod test {
 
     #[test]
     fn div_by_2() {
-        // test a range of small scalars
         for i in 0u64..32 {
             let scalar = Scalar::from(i);
             let dividend = scalar.div_by_2();
             assert_eq!(scalar, dividend + dividend);
         }
 
-        // test a range of scalars near the modulus
         for i in 0u64..32 {
             let scalar = Scalar::ZERO - Scalar::from(i);
             let dividend = scalar.div_by_2();
@@ -1573,7 +1085,7 @@ pub mod test {
         assert_eq!(biggest, CANONICAL_2_256_MINUS_1);
     }
 
-    // the fold schedule agrees with the montgomery path at every edge
+    // the fold reduction agrees with the Montgomery path at every edge
     #[test]
     fn wide_reduction_matches_montgomery() {
         let l = constants::BASEPOINT_ORDER.to_bytes();
@@ -1614,13 +1126,11 @@ pub mod test {
     #[test]
     fn from_bytes_mod_order_wide() {
         let mut bignum = [0u8; 64];
-        // set bignum = x + 2^256x
         for i in 0..32 {
             bignum[i] = X[i];
             bignum[32 + i] = X[i];
         }
-        // 3958878930004874126169954872055634648693766179881526445624823978500314864344
-        // = x + 2^256x (mod l)
+        // The value x + 2^256 x mod l
         let reduced = Scalar {
             bytes: [
                 216, 154, 179, 139, 210, 121, 2, 71, 69, 99, 158, 216, 23, 173, 63, 100, 204, 0,
@@ -1642,7 +1152,7 @@ pub mod test {
         assert_eq!(should_be_one, Scalar::ONE);
     }
 
-    // Negating a scalar twice should result in the original scalar.
+    // negating a scalar twice gives the scalar back
     #[allow(non_snake_case)]
     #[test]
     fn neg_twice_is_identity() {
@@ -1665,13 +1175,11 @@ pub mod test {
     fn montgomery_reduce_matches_from_bytes_mod_order_wide() {
         let mut bignum = [0u8; 64];
 
-        // set bignum = x + 2^256x
         for i in 0..32 {
             bignum[i] = X[i];
             bignum[32 + i] = X[i];
         }
-        // x + 2^256x (mod l)
-        //         = 3958878930004874126169954872055634648693766179881526445624823978500314864344
+        // The value x + 2^256 x mod l
         let expected = Scalar {
             bytes: [
                 216, 154, 179, 139, 210, 121, 2, 71, 69, 99, 158, 216, 23, 173, 63, 100, 204, 0,
@@ -1680,35 +1188,28 @@ pub mod test {
         };
         let reduced = Scalar::from_bytes_mod_order_wide(&bignum);
 
-        // The reduced scalar should match the expected
         assert_eq!(reduced.bytes, expected.bytes);
 
-        //  (x + 2^256x) * R
         let interim =
             UnpackedScalar::mul_internal(&UnpackedScalar::from_bytes_wide(&bignum), &constants::R);
-        // ((x + 2^256x) * R) / R  (mod l)
         let montgomery_reduced = UnpackedScalar::montgomery_reduce(&interim);
 
-        // The Montgomery reduced scalar should match the reduced one, as well as the expected
         assert_eq!(montgomery_reduced.0, reduced.unpack().0);
         assert_eq!(montgomery_reduced.0, expected.unpack().0)
     }
 
     #[test]
     fn canonical_decoding() {
-        // canonical encoding of 1667457891
+        // The canonical encoding of 1667457891
         let canonical_bytes = [
             99, 99, 99, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0,
         ];
 
-        // encoding of
-        //   7265385991361016183439748078976496179028704920197054998554201349516117938192
-        // = 28380414028753969466561515933501938171588560817147392552250411230663687203 (mod l)
-        // non_canonical because unreduced mod l
+        // Every byte 16 encodes a value at or above l
         let non_canonical_bytes_because_unreduced = [16; 32];
 
-        // encoding with high bit set, to check that the parser isn't pre-masking the high bit
+        // The decoder must refuse a set high bit without masking it off
         let non_canonical_bytes_because_highbit = [
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 128,
@@ -1731,7 +1232,6 @@ pub mod test {
     fn invert_batch_with_a_zero_input_panics() {
         let mut xs = [Scalar::ONE; 16];
         xs[3] = Scalar::ZERO;
-        // This should panic in debug mode.
         Scalar::invert_batch(&mut xs);
     }
 
@@ -1801,19 +1301,15 @@ pub mod test {
             }
             term *= radix;
         }
-        // When the input is unreduced, we may only recover the scalar mod l.
+        // An unreduced input comes back only mod l
         assert_eq!(recovered_scalar, scalar.reduce());
     }
 
     #[test]
     fn test_pippenger_radix() {
         use core::iter;
-        // For each valid radix it tests that 1000 random-ish scalars can be restored
-        // from the produced representation precisely.
         let cases = (2..100)
             .map(|s| Scalar::from(s as u64).invert())
-            // The largest unreduced scalar, s = 2^255-1. This is not reduced mod l. Scalar mult
-            // still works though.
             .chain(iter::once(LARGEST_UNREDUCED_SCALAR));
 
         for scalar in cases {
@@ -1847,13 +1343,10 @@ pub mod test {
         }
     }
 
-    // Tests consistency of From<{integer}> impls for Scalar
+    // every integer conversion agrees with scalar addition
     #[test]
     fn test_scalar_from_int() {
         let s1 = Scalar::ONE;
-
-        // For `x` in `u8`, `u16`, `u32`, `u64`, and `u128`, check that
-        // `Scalar::from(x + 1) == Scalar::from(x) + Scalar::from(1)`
 
         let x = 0x23u8;
         let sx = Scalar::from(x);
@@ -1907,16 +1400,12 @@ pub mod test {
         );
     }
 
-    // Check that a * b == a.reduce() * a.reduce() for ANY scalars a,b, even ones that violate
-    // invariant #1, i.e., a,b > 2^255. Old versions of ed25519-dalek did multiplication where a
-    // was reduced and b was clamped and unreduced. This checks that was always well-defined.
+    // multiplication gives the same product whether or not either input is reduced first
     #[test]
     fn test_mul_reduction_invariance() {
         let mut rng = rand::rng();
 
         for _ in 0..10 {
-            // Also define c that's clamped. We'll make sure that clamping doesn't affect
-            // computation
             let (a, b, c) = {
                 let mut a_bytes = [0u8; 32];
                 let mut b_bytes = [0u8; 32];
@@ -1933,7 +1422,6 @@ pub mod test {
                 )
             };
 
-            // Make sure this is the same product no matter how you cut it
             let reduced_mul_ab = a.reduce() * b.reduce();
             let reduced_mul_ac = a.reduce() * c.reduce();
             assert_eq!(a * b, reduced_mul_ab);

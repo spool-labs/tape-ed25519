@@ -1,7 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Field arithmetic modulo 2^255 - 19 on five 51-bit limbs with 128-bit products
 
-//! Field arithmetic modulo \\(p = 2\^{255} - 19\\), using \\(64\\)-bit
-//! limbs with \\(128\\)-bit products.
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 use core::fmt::Debug;
 use core::ops::Neg;
@@ -12,21 +11,7 @@ use core::ops::{Sub, SubAssign};
 use subtle::Choice;
 use subtle::ConditionallySelectable;
 
-/// A `FieldElement51` represents an element of the field
-/// \\( \mathbb Z / (2\^{255} - 19)\\).
-///
-/// In the 64-bit implementation, a `FieldElement` is represented in
-/// radix \\(2\^{51}\\) as five `u64`s; the coefficients are allowed to
-/// grow up to \\(2\^{54}\\) between reductions modulo \\(p\\).
-///
-/// # Note
-///
-/// The `solana_ed25519::field` module provides a type alias
-/// `solana_ed25519::field::FieldElement` to either `FieldElement51`
-/// or `FieldElement2625`.
-///
-/// The backend-specific type `FieldElement51` should not be used
-/// outside of the `solana_ed25519::field` module.
+/// An element of GF(2^255 - 19) as five radix 2^51 limbs, each allowed up to 2^54 between reductions
 #[derive(Clone, Copy)]
 pub struct FieldElement51(pub [u64; 5]);
 
@@ -63,15 +48,7 @@ impl SubAssign<&FieldElement51> for FieldElement51 {
 impl Sub<&FieldElement51> for &FieldElement51 {
     type Output = FieldElement51;
     fn sub(self, _rhs: &FieldElement51) -> FieldElement51 {
-        // To avoid underflow, first add a multiple of p.
-        // Choose 16*p = p << 4 to be larger than 54-bit _rhs.
-        //
-        // If we could statically track the bitlengths of the limbs
-        // of every FieldElement51, we could choose a multiple of p
-        // just bigger than _rhs and avoid having to do a reduction.
-        //
-        // Since we don't yet have type-level integers to do this, we
-        // have to add an explicit reduction call here.
+        // Adding 16p first keeps the subtraction from underflowing on 54-bit limbs
         FieldElement51::reduce([
             (self.0[0] + 36028797018963664u64) - _rhs.0[0],
             (self.0[1] + 36028797018963952u64) - _rhs.0[1],
@@ -92,64 +69,35 @@ impl MulAssign<&FieldElement51> for FieldElement51 {
 impl Mul<&FieldElement51> for &FieldElement51 {
     type Output = FieldElement51;
 
-    #[rustfmt::skip] // keep alignment of c* calculations
+    #[rustfmt::skip]
     fn mul(self, _rhs: &FieldElement51) -> FieldElement51 {
-        /// Helper function to multiply two 64-bit integers with 128
-        /// bits of output.
+        /// Multiply two u64 values into a u128
         #[inline(always)]
         fn m(x: u64, y: u64) -> u128 { (x as u128) * (y as u128) }
 
-        // Alias self, _rhs for more readable formulas
         let a: &[u64; 5] = &self.0;
         let b: &[u64; 5] = &_rhs.0;
 
-        // Precondition: assume input limbs a[i], b[i] are bounded as
-        //
-        // a[i], b[i] < 2^(51 + b)
-        //
-        // where b is a real parameter measuring the "bit excess" of the limbs.
-
-        // 64-bit precomputations to avoid 128-bit multiplications.
-        //
-        // This fits into a u64 whenever 51 + b + lg(19) < 64.
-        //
-        // Since 51 + b + lg(19) < 51 + 4.25 + b
-        //                       = 55.25 + b,
-        // this fits if b < 8.75.
+        // Limbs below 2^54 keep each product by 19 inside a u64
         let b1_19 = b[1] * 19;
         let b2_19 = b[2] * 19;
         let b3_19 = b[3] * 19;
         let b4_19 = b[4] * 19;
 
-        // Multiply to get 128-bit coefficients of output
         let     c0: u128 = m(a[0], b[0]) + m(a[4], b1_19) + m(a[3], b2_19) + m(a[2], b3_19) + m(a[1], b4_19);
         let mut c1: u128 = m(a[1], b[0]) + m(a[0],  b[1]) + m(a[4], b2_19) + m(a[3], b3_19) + m(a[2], b4_19);
         let mut c2: u128 = m(a[2], b[0]) + m(a[1],  b[1]) + m(a[0],  b[2]) + m(a[4], b3_19) + m(a[3], b4_19);
         let mut c3: u128 = m(a[3], b[0]) + m(a[2],  b[1]) + m(a[1],  b[2]) + m(a[0],  b[3]) + m(a[4], b4_19);
         let mut c4: u128 = m(a[4], b[0]) + m(a[3],  b[1]) + m(a[2],  b[2]) + m(a[1],  b[3]) + m(a[0] , b[4]);
 
-        // How big are the c[i]? We have
-        //
-        //    c[i] < 2^(102 + 2*b) * (1+i + (4-i)*19)
-        //         < 2^(102 + lg(1 + 4*19) + 2*b)
-        //         < 2^(108.27 + 2*b)
-        //
-        // The carry (c[i] >> 51) fits into a u64 when
-        //    108.27 + 2*b - 51 < 64
-        //    2*b < 6.73
-        //    b < 3.365.
-        //
-        // So we require b < 3 to ensure this fits.
+        // Limbs below 2^54 keep each c[i] >> 51 inside a u64
         debug_assert!(a[0] < (1 << 54)); debug_assert!(b[0] < (1 << 54));
         debug_assert!(a[1] < (1 << 54)); debug_assert!(b[1] < (1 << 54));
         debug_assert!(a[2] < (1 << 54)); debug_assert!(b[2] < (1 << 54));
         debug_assert!(a[3] < (1 << 54)); debug_assert!(b[3] < (1 << 54));
         debug_assert!(a[4] < (1 << 54)); debug_assert!(b[4] < (1 << 54));
 
-        // Casting to u64 and back tells the compiler that the carry is
-        // bounded by 2^64, so that the addition is a u128 + u64 rather
-        // than u128 + u128.
-
+        // The u64 round trip lets the compiler add a u64 to a u128
         const LOW_51_BIT_MASK: u64 = (1u64 << 51) - 1;
         let mut out = [0u64; 5];
 
@@ -168,28 +116,12 @@ impl Mul<&FieldElement51> for &FieldElement51 {
         let carry: u64 = (c4 >> 51) as u64;
         out[4] = (c4 as u64) & LOW_51_BIT_MASK;
 
-        // To see that this does not overflow, we need out[0] + carry * 19 < 2^64.
-        //
-        // c4 < a0*b4 + a1*b3 + a2*b2 + a3*b1 + a4*b0 + (carry from c3)
-        //    < 5*(2^(51 + b) * 2^(51 + b)) + (carry from c3)
-        //    < 2^(102 + 2*b + lg(5)) + 2^64.
-        //
-        // When b < 3 we get
-        //
-        // c4 < 2^110.33  so that carry < 2^59.33
-        //
-        // so that
-        //
-        // out[0] + carry * 19 < 2^51 + 19 * 2^59.33 < 2^63.58
-        //
-        // and there is no overflow.
+        // The top bits stay below 2^60, so folding them in times 19 cannot overflow
         out[0] += carry * 19;
 
-        // Now out[1] < 2^51 + 2^(64 -51) = 2^51 + 2^13 < 2^(51 + epsilon).
         out[1] += out[0] >> 51;
         out[0] &= LOW_51_BIT_MASK;
 
-        // Now out[i] < 2^(51 + epsilon) for all i.
         FieldElement51(out)
     }
 }
@@ -240,11 +172,11 @@ impl FieldElement51 {
         FieldElement51(limbs)
     }
 
-    /// The scalar \\( 0 \\).
+    /// The field element zero
     pub const ZERO: FieldElement51 = FieldElement51::from_limbs([0, 0, 0, 0, 0]);
-    /// The scalar \\( 1 \\).
+    /// The field element one
     pub const ONE: FieldElement51 = FieldElement51::from_limbs([1, 0, 0, 0, 0]);
-    /// The scalar \\( -1 \\).
+    /// The field element minus one
     pub const MINUS_ONE: FieldElement51 = FieldElement51::from_limbs([
         2251799813685228,
         2251799813685247,
@@ -255,7 +187,7 @@ impl FieldElement51 {
 
     /// Invert the sign of this field element
     pub fn negate(&mut self) {
-        // See commentary in the Sub impl
+        // Subtracting from 16p keeps every limb nonnegative
         let neg = FieldElement51::reduce([
             36028797018963664u64 - self.0[0],
             36028797018963952u64 - self.0[1],
@@ -266,22 +198,12 @@ impl FieldElement51 {
         self.0 = neg.0;
     }
 
-    /// Given 64-bit input limbs, reduce to enforce the bound 2^(51 + epsilon).
+    /// Reduce 64-bit limbs to just above 51 bits each
     #[inline(always)]
     fn reduce(mut limbs: [u64; 5]) -> FieldElement51 {
         const LOW_51_BIT_MASK: u64 = (1u64 << 51) - 1;
 
-        // Since the input limbs are bounded by 2^64, the biggest
-        // carry-out is bounded by 2^13.
-        //
-        // The biggest carry-in is c4 * 19, resulting in
-        //
-        // 2^51 + 19*2^13 < 2^51.0000000001
-        //
-        // Because we don't need to canonicalize, only to reduce the
-        // limb sizes, it's OK to do a "weak reduction", where we
-        // compute the carry-outs in parallel.
-
+        // A weak reduction suffices, so every limb passes its high bits up in parallel
         let c0 = limbs[0] >> 51;
         let c1 = limbs[1] >> 51;
         let c2 = limbs[2] >> 51;
@@ -303,19 +225,8 @@ impl FieldElement51 {
         FieldElement51(limbs)
     }
 
-    /// Load a `FieldElement51` from the low 255 bits of a 256-bit
-    /// input.
-    ///
-    /// # Warning
-    ///
-    /// This function does not check that the input used the canonical
-    /// representative.  It masks the high bit, but it will happily
-    /// decode 2^255 - 18 to 1.  Applications that require a canonical
-    /// encoding of every field element should decode, re-encode to
-    /// the canonical encoding, and check that the input was
-    /// canonical.
-    ///
-    #[rustfmt::skip] // keep alignment of bit shifts
+    /// Load the low 255 bits of 32 bytes, accepting non-canonical encodings
+    #[rustfmt::skip]
     pub const fn from_bytes(bytes: &[u8; 32]) -> FieldElement51 {
         const fn load8_at(input: &[u8], i: usize) -> u64 {
                (input[i] as u64)
@@ -330,39 +241,18 @@ impl FieldElement51 {
 
         let low_51_bit_mask = (1u64 << 51) - 1;
         FieldElement51(
-        // load bits [  0, 64), no shift
         [  load8_at(bytes,  0)        & low_51_bit_mask
-        // load bits [ 48,112), shift to [ 51,112)
         , (load8_at(bytes,  6) >>  3) & low_51_bit_mask
-        // load bits [ 96,160), shift to [102,160)
         , (load8_at(bytes, 12) >>  6) & low_51_bit_mask
-        // load bits [152,216), shift to [153,216)
         , (load8_at(bytes, 19) >>  1) & low_51_bit_mask
-        // load bits [192,256), shift to [204,112)
         , (load8_at(bytes, 24) >> 12) & low_51_bit_mask
         ])
     }
 
-    /// Serialize this `FieldElement51` to a 32-byte array.  The
-    /// encoding is canonical.
-    #[rustfmt::skip] // keep alignment of s[*] calculations
+    /// Encode as 32 canonical bytes
+    #[rustfmt::skip]
     pub fn to_bytes(self) -> [u8; 32] {
-        // Let h = limbs[0] + limbs[1]*2^51 + ... + limbs[4]*2^204.
-        //
-        // Write h = pq + r with 0 <= r < p.
-        //
-        // We want to compute r = h mod p.
-        //
-        // If h < 2*p = 2^256 - 38,
-        // then q = 0 or 1,
-        //
-        // with q = 0 when h < p
-        //  and q = 1 when h >= p.
-        //
-        // Notice that h >= p <==> h + 19 >= p + 19 <==> h + 19 >= 2^255.
-        // Therefore q can be computed as the carry bit of h + 19.
-
-        // First, reduce the limbs to ensure h < 2*p.
+        // After a weak reduction h < 2p, so the quotient q is bit 255 of h + 19
         let mut limbs = FieldElement51::reduce(self.0).0;
 
         let mut q = (limbs[0] + 19) >> 51;
@@ -371,11 +261,9 @@ impl FieldElement51 {
         q = (limbs[3] + q) >> 51;
         q = (limbs[4] + q) >> 51;
 
-        // Now we can compute r as r = h - pq = r - (2^255-19)q = r + 19q - 2^255q
-
+        // Compute h - pq as h + 19q with bit 255 dropped at the end
         limbs[0] += 19 * q;
 
-        // Now carry the result to compute r + 19q ...
         let low_51_bit_mask = (1u64 << 51) - 1;
         limbs[1] += limbs[0] >> 51;
         limbs[0] &= low_51_bit_mask;
@@ -385,11 +273,8 @@ impl FieldElement51 {
         limbs[2] &= low_51_bit_mask;
         limbs[4] += limbs[3] >> 51;
         limbs[3] &= low_51_bit_mask;
-        // ... but instead of carrying (limbs[4] >> 51) = 2^255q
-        // into another limb, discard it, subtracting the value
         limbs[4] &= low_51_bit_mask;
 
-        // Now arrange the bits of the limbs.
         let mut s = [0u8;32];
         s[ 0] =   limbs[0]                           as u8;
         s[ 1] =  (limbs[0] >>  8)                    as u8;
@@ -424,19 +309,18 @@ impl FieldElement51 {
         s[30] =  (limbs[4] >> 36)                    as u8;
         s[31] =  (limbs[4] >> 44)                    as u8;
 
-        // High bit should be zero.
         debug_assert!((s[31] & 0b1000_0000u8) == 0u8);
 
         s
     }
 
-    /// Given `k > 0`, return `self^(2^k)`.
-    #[rustfmt::skip] // keep alignment of c* calculations
+    /// Return `self^(2^k)` for `k > 0`
+    #[rustfmt::skip]
     pub fn pow2k(&self, mut k: u32) -> FieldElement51 {
 
         debug_assert!( k > 0 );
 
-        /// Multiply two 64-bit integers with 128 bits of output.
+        /// Multiply two u64 values into a u128
         #[inline(always)]
         fn m(x: u64, y: u64) -> u128 {
             (x as u128) * (y as u128)
@@ -445,44 +329,17 @@ impl FieldElement51 {
         let mut a: [u64; 5] = self.0;
 
         loop {
-            // Precondition: assume input limbs a[i] are bounded as
-            //
-            // a[i] < 2^(51 + b)
-            //
-            // where b is a real parameter measuring the "bit excess" of the limbs.
-
-            // Precomputation: 64-bit multiply by 19.
-            //
-            // This fits into a u64 whenever 51 + b + lg(19) < 64.
-            //
-            // Since 51 + b + lg(19) < 51 + 4.25 + b
-            //                       = 55.25 + b,
-            // this fits if b < 8.75.
+            // Limbs below 2^54 keep each product by 19 inside a u64
             let a3_19 = 19 * a[3];
             let a4_19 = 19 * a[4];
 
-            // Multiply to get 128-bit coefficients of output.
-            //
-            // The 128-bit multiplications by 2 turn into 1 slr + 1 slrd each,
-            // which doesn't seem any better or worse than doing them as precomputations
-            // on the 64-bit inputs.
             let     c0: u128 = m(a[0],  a[0]) + 2*( m(a[1], a4_19) + m(a[2], a3_19) );
             let mut c1: u128 = m(a[3], a3_19) + 2*( m(a[0],  a[1]) + m(a[2], a4_19) );
             let mut c2: u128 = m(a[1],  a[1]) + 2*( m(a[0],  a[2]) + m(a[4], a3_19) );
             let mut c3: u128 = m(a[4], a4_19) + 2*( m(a[0],  a[3]) + m(a[1],  a[2]) );
             let mut c4: u128 = m(a[2],  a[2]) + 2*( m(a[0],  a[4]) + m(a[1],  a[3]) );
 
-            // Same bound as in multiply:
-            //    c[i] < 2^(102 + 2*b) * (1+i + (4-i)*19)
-            //         < 2^(102 + lg(1 + 4*19) + 2*b)
-            //         < 2^(108.27 + 2*b)
-            //
-            // The carry (c[i] >> 51) fits into a u64 when
-            //    108.27 + 2*b - 51 < 64
-            //    2*b < 6.73
-            //    b < 3.365.
-            //
-            // So we require b < 3 to ensure this fits.
+            // Limbs below 2^54 keep each c[i] >> 51 inside a u64
             debug_assert!(a[0] < (1 << 54));
             debug_assert!(a[1] < (1 << 54));
             debug_assert!(a[2] < (1 << 54));
@@ -491,8 +348,7 @@ impl FieldElement51 {
 
             const LOW_51_BIT_MASK: u64 = (1u64 << 51) - 1;
 
-            // Casting to u64 and back tells the compiler that the carry is bounded by 2^64, so
-            // that the addition is a u128 + u64 rather than u128 + u128.
+            // The u64 round trip lets the compiler add a u64 to a u128
             c1 += ((c0 >> 51) as u64) as u128;
             a[0] = (c0 as u64) & LOW_51_BIT_MASK;
 
@@ -508,27 +364,11 @@ impl FieldElement51 {
             let carry: u64 = (c4 >> 51) as u64;
             a[4] = (c4 as u64) & LOW_51_BIT_MASK;
 
-            // To see that this does not overflow, we need a[0] + carry * 19 < 2^64.
-            //
-            // c4 < a2^2 + 2*a0*a4 + 2*a1*a3 + (carry from c3)
-            //    < 2^(102 + 2*b + lg(5)) + 2^64.
-            //
-            // When b < 3 we get
-            //
-            // c4 < 2^110.33  so that carry < 2^59.33
-            //
-            // so that
-            //
-            // a[0] + carry * 19 < 2^51 + 19 * 2^59.33 < 2^63.58
-            //
-            // and there is no overflow.
+            // The top bits stay below 2^60, so folding them in times 19 cannot overflow
             a[0] += carry * 19;
 
-            // Now a[1] < 2^51 + 2^(64 -51) = 2^51 + 2^13 < 2^(51 + epsilon).
             a[1] += a[0] >> 51;
             a[0] &= LOW_51_BIT_MASK;
-
-            // Now all a[i] < 2^(51 + epsilon) and a = self^(2^k).
 
             k -= 1;
             if k == 0 {
@@ -539,12 +379,12 @@ impl FieldElement51 {
         FieldElement51(a)
     }
 
-    /// Returns the square of this field element.
+    /// Square this field element
     pub fn square(&self) -> FieldElement51 {
         self.pow2k(1)
     }
 
-    /// Returns 2 times the square of this field element.
+    /// Return twice the square of this field element
     pub fn square2(&self) -> FieldElement51 {
         let mut square = self.pow2k(1);
         for i in 0..5 {

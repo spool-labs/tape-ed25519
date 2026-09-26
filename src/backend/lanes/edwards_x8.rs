@@ -1,4 +1,6 @@
-// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause. See LICENSE.
+//! Eight Edwards points side by side, one per signature lane
+
+// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -8,7 +10,7 @@ use crate::constants::{EDWARDS_D, EDWARDS_D2};
 #[cfg(test)]
 use crate::edwards::EdwardsPoint;
 
-/// Eight extended-coordinate points \\((X : Y : Z : T)\\), one per lane.
+/// Eight points in extended coordinates `(X : Y : Z : T)`, one per lane
 #[derive(Clone, Copy, Debug)]
 pub struct ExtendedPointX8 {
     pub X: FieldElementX8,
@@ -17,7 +19,7 @@ pub struct ExtendedPointX8 {
     pub T: FieldElementX8,
 }
 
-/// Eight points in completed form, the output of the addition and doubling formulas.
+/// Eight points in completed form, as the addition and doubling formulas return them
 #[derive(Clone, Copy, Debug)]
 pub struct CompletedPointX8 {
     pub X: FieldElementX8,
@@ -26,7 +28,7 @@ pub struct CompletedPointX8 {
     pub T: FieldElementX8,
 }
 
-/// Eight projective points \\((X : Y : Z)\\), used on the doubling chain.
+/// Eight projective points `(X : Y : Z)` for the doubling chain
 #[derive(Clone, Copy, Debug)]
 pub struct ProjectivePointX8 {
     pub X: FieldElementX8,
@@ -34,7 +36,7 @@ pub struct ProjectivePointX8 {
     pub Z: FieldElementX8,
 }
 
-/// Eight cached ("projective Niels") points for readdition.
+/// Eight cached projective Niels points for readdition
 #[derive(Clone, Copy, Debug)]
 pub struct ProjectiveNielsX8 {
     pub Y_plus_X: FieldElementX8,
@@ -51,7 +53,7 @@ impl ExtendedPointX8 {
         T: FieldElementX8::ZERO,
     };
 
-    /// Gather eight serial points into lanes.
+    /// Gather eight serial points into lanes
     #[cfg(test)]
     pub fn from_lanes(points: &[EdwardsPoint; LANES]) -> ExtendedPointX8 {
         ExtendedPointX8 {
@@ -62,7 +64,7 @@ impl ExtendedPointX8 {
         }
     }
 
-    /// Extract lane `l` as a serial point.
+    /// Extract lane `l` as a serial point
     #[cfg(test)]
     pub fn lane(&self, l: usize) -> EdwardsPoint {
         EdwardsPoint {
@@ -90,7 +92,7 @@ impl ExtendedPointX8 {
         }
     }
 
-    /// Add a cached point (mixed readdition), lane-wise.
+    /// Add a cached point in every lane
     pub fn add(&self, other: &ProjectiveNielsX8) -> CompletedPointX8 {
         let Y_plus_X = self.Y.add(&self.X);
         let Y_minus_X = self.Y.sub(&self.X);
@@ -108,7 +110,7 @@ impl ExtendedPointX8 {
         }
     }
 
-    /// Compute \\([2^k] P\\) lane-wise by successive doublings.
+    /// Compute `[2^k] P` in every lane by successive doublings
     pub fn mul_by_pow_2(&self, k: u32) -> ExtendedPointX8 {
         debug_assert!(k > 0);
         let mut r: CompletedPointX8;
@@ -120,7 +122,7 @@ impl ExtendedPointX8 {
         s.double().as_extended()
     }
 
-    /// `true` for lanes holding the identity: \\(X = 0\\) and \\(Y = Z\\).
+    /// Flag the lanes that hold the identity, where `X = 0` and `Y = Z`
     pub fn is_identity_lanes(&self) -> LaneMask {
         let x_zero = self.X.is_zero_lanes();
         let y_eq_z = self.Y.sub(&self.Z).is_zero_lanes();
@@ -167,7 +169,7 @@ impl ProjectivePointX8 {
 }
 
 impl ProjectiveNielsX8 {
-    /// The identity as a cached point: adding it leaves a point unchanged.
+    /// The identity as a cached point
     pub const IDENTITY: ProjectiveNielsX8 = ProjectiveNielsX8 {
         Y_plus_X: FieldElementX8::ONE,
         Y_minus_X: FieldElementX8::ONE,
@@ -175,7 +177,7 @@ impl ProjectiveNielsX8 {
         T2d: FieldElementX8::ZERO,
     };
 
-    /// Copy a single lane from `src` into lane `l` of `self`.
+    /// Copy lane `l` of `src` into lane `l` of `self`
     fn copy_lane(&mut self, l: usize, src: &ProjectiveNielsX8) {
         for i in 0..5 {
             self.Y_plus_X.limbs[i][l] = src.Y_plus_X.limbs[i][l];
@@ -185,7 +187,7 @@ impl ProjectiveNielsX8 {
         }
     }
 
-    /// Negate the marked lanes: swap \\(Y + X\\) with \\(Y - X\\), negate \\(2dT\\).
+    /// Negate the flagged lanes by swapping `Y + X` with `Y - X` and negating `2dT`
     fn negate_lanes(&self, negate: &LaneMask) -> ProjectiveNielsX8 {
         let neg_T2d = self.T2d.neg();
         let mut out = *self;
@@ -202,12 +204,11 @@ impl ProjectiveNielsX8 {
     }
 }
 
-/// Per-lane `[P, 2P, ..., 8P]` for eight base points, indexed by a signed
-/// radix-16 digit in \\([-8, 8]\\).
+/// The multiples `[P, 2P, ..., 8P]` of eight points, one table per lane
 pub struct LookupTableX8(pub [ProjectiveNielsX8; 8]);
 
 impl LookupTableX8 {
-    /// Build `[P, 2P, ..., 8P]` for all lanes at once.
+    /// Build `[P, 2P, ..., 8P]` for all lanes at once
     pub fn from_extended(P: &ExtendedPointX8) -> LookupTableX8 {
         let mut points = [P.to_projective_niels(); 8];
         for j in 0..7 {
@@ -216,8 +217,7 @@ impl LookupTableX8 {
         LookupTableX8(points)
     }
 
-    /// Select, per lane, the entry for a signed radix-16 digit: `d > 0` yields
-    /// \\([d]P\\), `d < 0` yields \\(-[|d|]P\\), and `0` yields the identity.
+    /// Select `[d]P` per lane for a signed radix-16 digit `d` in -8..=8
     pub fn select(&self, digits: &[i8; LANES]) -> ProjectiveNielsX8 {
         let mut out = ProjectiveNielsX8::IDENTITY;
         let mut negate: LaneMask = [false; LANES];
@@ -234,21 +234,18 @@ impl LookupTableX8 {
     }
 }
 
-/// Decompress eight encodings lane-wise with ZIP-215 semantics, as
-/// `CompressedEdwardsY::decompress` does.
-///
-/// Lanes that are not valid curve points are reported `false` and hold the identity.
+/// Decompress eight encodings under the ZIP-215 rules, with invalid lanes flagged and set to the identity
 pub fn decompress_x8(encodings: &[[u8; 32]; LANES]) -> (ExtendedPointX8, LaneMask) {
     let Y = FieldElementX8::from_lanes(&core::array::from_fn(|l| {
         FieldElement51::from_bytes(&encodings[l])
     }));
     let Z = FieldElementX8::ONE;
     let YY = Y.square();
-    let u = YY.sub(&Z); // u = y^2 - 1
-    let v = YY.mul(&FieldElementX8::splat(EDWARDS_D)).add(&Z); // v = dy^2 + 1
+    let u = YY.sub(&Z);
+    let v = YY.mul(&FieldElementX8::splat(EDWARDS_D)).add(&Z);
     let (is_valid, X) = sqrt_ratio_i_x8(&u, &v);
 
-    // sqrt_ratio returns the nonnegative root; apply the encoded sign bit.
+    // The root comes back nonnegative, so the encoded sign bit picks the sign
     let sign_bits: LaneMask = core::array::from_fn(|l| encodings[l][31] >> 7 == 1);
     let X = X.negate_lanes(&sign_bits);
 
@@ -259,7 +256,6 @@ pub fn decompress_x8(encodings: &[[u8; 32]; LANES]) -> (ExtendedPointX8, LaneMas
         Z,
     };
 
-    // Park invalid lanes at the identity.
     let mut out = ExtendedPointX8::IDENTITY;
     let keep: LaneMask = is_valid;
     out.X = out.X.select_lanes(&point.X, &keep);
@@ -318,14 +314,13 @@ mod test {
         assert_lanes_eq(&by8, &expected_by8, "mul_by_pow_2");
     }
 
-    // a table select yields the signed multiple the digit names, per lane
+    // a table select yields the signed multiple of each lane's digit
     #[test]
     fn table_select_matches_serial_multiples() {
         let ps = test_points(37);
         let P = ExtendedPointX8::from_lanes(&ps);
         let table = LookupTableX8::from_extended(&P);
 
-        // A spread of digits, including 0 and both signs.
         let digits: [i8; LANES] = [0, 1, -1, 8, -8, 3, -5, 7];
         let selected = ExtendedPointX8::IDENTITY
             .add(&table.select(&digits))
@@ -358,7 +353,7 @@ mod test {
         let mut encodings: [[u8; 32]; LANES] =
             core::array::from_fn(|l| ps[l].compress().to_bytes());
 
-        // Lane 2: flipped sign bit. Lane 4: invalid point. Lane 6: identity.
+        // lane 2 flips the sign bit, lane 4 is off the curve, lane 6 is the identity
         encodings[2][31] ^= 1 << 7;
         encodings[4] = [0x05; 32];
         encodings[6] = CompressedEdwardsY::identity().to_bytes();

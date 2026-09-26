@@ -1,9 +1,6 @@
-// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause. See LICENSE.
+//! Variable-time four-term multiplication with two 128-bit scalars and a split 256-bit basepoint scalar
 
-//! This file is new in curve25519-sol and has no upstream equivalent in
-//! curve25519-dalek.  It implements a 4-variable multi-scalar multiplication
-//! optimised for two 128-bit scalars and one 256-bit scalar, designed to
-//! support the HEEA-accelerated Ed25519 verification path.
+// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -19,47 +16,12 @@ use crate::window::NafLookupTable5;
 
 const DYNAMIC_NAF_WINDOW: usize = 5;
 
-// The static basepoint tables are width-8 when precomputed tables are
-// enabled, so both halves of the basepoint scalar use width-8 NAF digits.
-// Without precomputed tables the tables are built at runtime, where width 5
-// keeps the table construction cost low.
+// Both basepoint tables hold width-8 odd multiples
 const B_LO_NAF_WINDOW: usize = 8;
 
 const B_HI_NAF_WINDOW: usize = 8;
 
-/// Compute \\(a_1 A_1 + a_2 A_2 + b B\\) in variable time, where \\(B\\) is the Ed25519 basepoint.
-///
-/// This function is optimized for the case where \\(a_1\\) and \\(a_2\\) are known to be less than
-/// \\(2^{128}\\), while \\(b\\) is a full 256-bit scalar.
-///
-/// # Precondition
-///
-/// Callers must ensure \\(a_1\\) and \\(a_2\\) are less than \\(2^{128}\\). Use
-/// `vartime_triple_base_mul_128_128_256` for a checked wrapper that falls back
-/// to general scalar multiplication for full-width scalars.
-///
-/// # Optimization Strategy
-///
-/// The function decomposes the 256-bit scalar \\(b\\) as \\(b = b_{lo} + b_{hi} \cdot 2^{128}\\),
-/// where both \\(b_{lo}\\) and \\(b_{hi}\\) are 128-bit values. This allows computing:
-///
-/// \\[
-/// a_1 A_1 + a_2 A_2 + b_{lo} B + b_{hi} B'
-/// \\]
-///
-/// where \\(B' = B \cdot 2^{128}\\) is a precomputed constant. Now all four scalars
-/// (\\(a_1, a_2, b_{lo}, b_{hi}\\)) are 128 bits, and two of the bases (\\(B\\) and \\(B'\\))
-/// use precomputed tables.
-///
-/// # Implementation
-///
-/// - For \\(A_1\\) and \\(A_2\\): NAF with window width 5 (8 precomputed points each)
-/// - For \\(B\\) and \\(B'\\): NAF with window width 8 selected from the static
-///   width-8 affine tables when precomputed tables are enabled, and window
-///   width 5 with runtime-built tables otherwise.
-///
-/// The algorithm shares doublings across all four scalar multiplications, processing
-/// only 128 bits instead of 256, providing approximately 2x speedup over the naive approach.
+/// Compute `a1 A1 + a2 A2 + b B` in variable time for `a1` and `a2` below 2^128
 pub fn mul_128_128_256_prechecked(
     a1: &Scalar,
     A1: &EdwardsPoint,
@@ -67,28 +29,24 @@ pub fn mul_128_128_256_prechecked(
     A2: &EdwardsPoint,
     b: &Scalar,
 ) -> EdwardsPoint {
-    // Decompose b into b_lo (lower 128 bits) and b_hi (upper 128 bits)
-    // b = b_lo + b_hi * 2^128
+    // Split b as b_lo + b_hi * 2^128 so every scalar spans 128 bits
     let b_bytes = b.as_bytes();
 
     let mut b_lo_bytes = [0u8; 32];
     let mut b_hi_bytes = [0u8; 32];
 
-    // Copy lower 16 bytes to b_lo, upper 16 bytes to b_hi
     b_lo_bytes[..16].copy_from_slice(&b_bytes[..16]);
     b_hi_bytes[..16].copy_from_slice(&b_bytes[16..]);
 
     let b_lo = Scalar::from_canonical_bytes_unchecked(b_lo_bytes);
     let b_hi = Scalar::from_canonical_bytes_unchecked(b_hi_bytes);
 
-    // Compute NAF representations (all scalars are now ~128 bits).
     let a1_naf = a1.non_adjacent_form_128(DYNAMIC_NAF_WINDOW);
     let a2_naf = a2.non_adjacent_form_128(DYNAMIC_NAF_WINDOW);
     let b_lo_naf = b_lo.non_adjacent_form_128(B_LO_NAF_WINDOW);
     let b_hi_naf = b_hi.non_adjacent_form_128(B_HI_NAF_WINDOW);
 
-    // Find starting index - check all NAFs up to bit 127
-    // (with potential carry to bit 128 or 129)
+    // Start at the highest position where any digit is nonzero, up to bit 129
     let mut i: usize = HEEA_MAX_INDEX;
     for j in (0..=HEEA_MAX_INDEX).rev() {
         i = j;
@@ -97,13 +55,12 @@ pub fn mul_128_128_256_prechecked(
         }
     }
 
-    // Create lookup tables
     let table_A1 = NafLookupTable5::<ProjectiveNielsPoint>::from(A1);
     let table_A2 = NafLookupTable5::<ProjectiveNielsPoint>::from(A2);
 
     let table_B = &constants::AFFINE_ODD_MULTIPLES_OF_BASEPOINT;
 
-    // B' = B * 2^128 (precomputed constant point)
+    // This table holds odd multiples of B * 2^128
     let table_B_128 = &constants::AFFINE_ODD_MULTIPLES_OF_BASEPOINT_128;
 
     let mut r = ProjectivePoint::identity();
@@ -111,28 +68,24 @@ pub fn mul_128_128_256_prechecked(
     loop {
         let mut t = r.double();
 
-        // Add contributions from a1*A1
         match a1_naf[i].cmp(&0) {
             Ordering::Greater => t = &t.as_extended() + &table_A1.select(a1_naf[i] as usize),
             Ordering::Less => t = &t.as_extended() - &table_A1.select(-a1_naf[i] as usize),
             Ordering::Equal => {}
         }
 
-        // Add contributions from a2*A2
         match a2_naf[i].cmp(&0) {
             Ordering::Greater => t = &t.as_extended() + &table_A2.select(a2_naf[i] as usize),
             Ordering::Less => t = &t.as_extended() - &table_A2.select(-a2_naf[i] as usize),
             Ordering::Equal => {}
         }
 
-        // Add contributions from b_lo*B
         match b_lo_naf[i].cmp(&0) {
             Ordering::Greater => t = &t.as_extended() + &table_B.select(b_lo_naf[i] as usize),
             Ordering::Less => t = &t.as_extended() - &table_B.select(-b_lo_naf[i] as usize),
             Ordering::Equal => {}
         }
 
-        // Add contributions from b_hi*B' where B' = B * 2^128
         match b_hi_naf[i].cmp(&0) {
             Ordering::Greater => t = &t.as_extended() + &table_B_128.select(b_hi_naf[i] as usize),
             Ordering::Less => t = &t.as_extended() - &table_B_128.select(-b_hi_naf[i] as usize),
@@ -166,19 +119,15 @@ mod test {
 
     #[test]
     fn test_triple_base_multiplication() {
-        // Test vectors with random scalars
         let a1 = Scalar::from(12345u64);
         let a2 = Scalar::from(67890u64);
         let b = random_scalar();
 
-        // Random points (using scalar multiplication of basepoint)
         let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(2u64);
         let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(3u64);
 
-        // Compute using the optimized triple-base function
         let result = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
 
-        // Compute using naive addition
         let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
 
         assert_eq!(result, expected);
@@ -186,8 +135,6 @@ mod test {
 
     #[test]
     fn test_triple_base_multiplication_128() {
-        // Test with 128-bit scalars for a1 and a2
-        // Create a 128-bit scalar (use lower half)
         let a1_bytes = [
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
             0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -202,17 +149,13 @@ mod test {
         ];
         let a2 = Scalar::from_bytes_mod_order(a2_bytes);
 
-        // Full 256-bit scalar for b
         let b = random_scalar();
 
-        // Test points
         let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(5u64);
         let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(7u64);
 
-        // Test the optimized 128-bit version
         let result_128 = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
 
-        // Compute expected result
         let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
 
         assert_eq!(result_128, expected, "Optimized 128-bit version failed");
@@ -250,7 +193,6 @@ mod test {
 
     #[test]
     fn test_triple_base_consistency() {
-        // Test that both functions give the same result for 128-bit inputs
         let a1 = Scalar::from(0x123456789ABCDEFu64);
         let a2 = Scalar::from(0xFEDCBA987654321u64);
         let b = random_scalar();
@@ -266,7 +208,6 @@ mod test {
 
     #[test]
     fn test_triple_base_large_scalars() {
-        // Test with large scalars
         let mut a1_bytes = [0xFFu8; 32];
         a1_bytes[16..].fill(0x00);
         let a1 = Scalar::from_bytes_mod_order(a1_bytes);
@@ -286,7 +227,6 @@ mod test {
         assert_eq!(result, expected);
     }
 
-    // Proptest for vartime_triple_scalar_mul_basepoint equivalence
     proptest::proptest! {
         #[test]
         fn proptest_triple_scalar_mul_equivalence(
@@ -296,7 +236,6 @@ mod test {
             A1_scalar_bytes in proptest::array::uniform32(proptest::num::u8::ANY),
             A2_scalar_bytes in proptest::array::uniform32(proptest::num::u8::ANY),
         ) {
-            // Construct 128-bit scalars a1 and a2 (upper 16 bytes are zero)
             let mut a1_bytes = [0u8; 32];
             let mut a2_bytes = [0u8; 32];
             a1_bytes[..16].copy_from_slice(&a1_bytes_16);
@@ -305,19 +244,15 @@ mod test {
             let a1 = Scalar::from_bytes_mod_order(a1_bytes);
             let a2 = Scalar::from_bytes_mod_order(a2_bytes);
 
-            // Construct full 256-bit scalar b
             let b = Scalar::from_bytes_mod_order(b_bytes);
 
-            // Generate random points A1 and A2 using scalar multiplication of basepoint
             let A1_scalar = Scalar::from_bytes_mod_order(A1_scalar_bytes);
             let A2_scalar = Scalar::from_bytes_mod_order(A2_scalar_bytes);
             let A1 = constants::ED25519_BASEPOINT_POINT * A1_scalar;
             let A2 = constants::ED25519_BASEPOINT_POINT * A2_scalar;
 
-            // Compute using the optimized triple-base function
             let result_optimized = mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
 
-            // Compute using raw operations: a1*A1 + a2*A2 + b*B
             let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
 
             proptest::prop_assert_eq!(result_optimized, expected, "Optimized triple scalar mul should equal raw operations");

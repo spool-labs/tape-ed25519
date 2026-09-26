@@ -1,25 +1,8 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Four field elements per AVX2 vector in 25.5-bit limbs, with bounds each caller keeps
 
-// Nightly and stable currently disagree on the requirement of unsafe blocks when `unsafe_target_feature`
-// gets used.
-// See: https://github.com/rust-lang/rust/issues/132856
+// Vendored from curve25519-dalek, BSD-3-Clause
+
 #![allow(unused_unsafe)]
-
-//! An implementation of 4-way vectorized 32bit field arithmetic using
-//! AVX2.
-//!
-//! The `FieldElement2625x4` struct provides a vector of four field
-//! elements, implemented using AVX2 operations.  Its API is designed
-//! to abstract away the platform-dependent details, so that point
-//! arithmetic can be implemented only in terms of a vector of field
-//! elements.
-//!
-//! At this level, the API is optimized for speed and not safety.  The
-//! `FieldElement2625x4` does not always perform reductions.  The pre-
-//! and post-conditions on the bounds of the coefficients are
-//! documented for each method, but it is the caller's responsibility
-//! to ensure that there are no overflows.
-
 #![allow(non_snake_case)]
 
 const A_LANES: u8 = 0b0000_0101;
@@ -46,15 +29,7 @@ use crate::backend::vector::avx2::constants::{
 
 use curve25519_dalek_derive::unsafe_target_feature;
 
-/// Unpack 32-bit lanes into 64-bit lanes:
-/// ```ascii,no_run
-/// (a0, b0, a1, b1, c0, d0, c1, d1)
-/// ```
-/// into
-/// ```ascii,no_run
-/// (a0, 0, b0, 0, c0, 0, d0, 0)
-/// (a1, 0, b1, 0, c1, 0, d1, 0)
-/// ```
+/// Spread (a0, b0, a1, b1, c0, d0, c1, d1) into (a0, 0, b0, 0, ...) and (a1, 0, b1, 0, ...)
 #[unsafe_target_feature("avx2")]
 #[inline(always)]
 fn unpack_pair(src: u32x8) -> (u32x8, u32x8) {
@@ -70,15 +45,7 @@ fn unpack_pair(src: u32x8) -> (u32x8, u32x8) {
     (a, b)
 }
 
-/// Repack 64-bit lanes into 32-bit lanes:
-/// ```ascii,no_run
-/// (a0, 0, b0, 0, c0, 0, d0, 0)
-/// (a1, 0, b1, 0, c1, 0, d1, 0)
-/// ```
-/// into
-/// ```ascii,no_run
-/// (a0, b0, a1, b1, c0, d0, c1, d1)
-/// ```
+/// Pack (a0, 0, b0, 0, ...) and (a1, 0, b1, 0, ...) back into (a0, b0, a1, b1, c0, d0, c1, d1)
 #[unsafe_target_feature("avx2")]
 #[inline(always)]
 fn repack_pair(x: u32x8, y: u32x8) -> u32x8 {
@@ -86,25 +53,14 @@ fn repack_pair(x: u32x8, y: u32x8) -> u32x8 {
         use core::arch::x86_64::_mm256_blend_epi32;
         use core::arch::x86_64::_mm256_shuffle_epi32;
 
-        // Input: x = (a0, 0, b0, 0, c0, 0, d0, 0)
-        // Input: y = (a1, 0, b1, 0, c1, 0, d1, 0)
-
         let x_shuffled = _mm256_shuffle_epi32(x.into(), 0b11_01_10_00);
         let y_shuffled = _mm256_shuffle_epi32(y.into(), 0b10_00_11_01);
-
-        // x' = (a0, b0,  0,  0, c0, d0,  0,  0)
-        // y' = ( 0,  0, a1, b1,  0,  0, c1, d1)
 
         _mm256_blend_epi32(x_shuffled, y_shuffled, 0b11001100).into()
     }
 }
 
-/// The `Lanes` enum represents a subset of the lanes `A,B,C,D` of a
-/// `FieldElement2625x4`.
-///
-/// It's used to specify blend operations without
-/// having to know details about the data layout of the
-/// `FieldElement2625x4`.
+/// A subset of the lanes A, B, C, D for a blend
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug)]
 pub enum Lanes {
@@ -118,11 +74,7 @@ pub enum Lanes {
     ABCD,
 }
 
-/// The `Shuffle` enum represents a shuffle of a `FieldElement2625x4`.
-///
-/// The enum variants are named by what they do to a vector \\(
-/// (A,B,C,D) \\); for instance, `Shuffle::BADC` turns \\( (A, B, C,
-/// D) \\) into \\( (B, A, D, C) \\).
+/// A lane shuffle, so `BADC` turns (A, B, C, D) into (B, A, D, C)
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug)]
 pub enum Shuffle {
@@ -138,13 +90,7 @@ pub enum Shuffle {
     ABDC,
 }
 
-/// A vector of four field elements.
-///
-/// Each operation on a `FieldElement2625x4` has documented effects on
-/// the bounds of the coefficients.  This API is designed for speed
-/// and not safety; it is the caller's responsibility to ensure that
-/// the post-conditions of one operation are compatible with the
-/// pre-conditions of the next.
+/// A vector of four field elements whose limb bounds the caller tracks
 #[derive(Clone, Copy, Debug)]
 pub struct FieldElement2625x4(pub [u32x8; 5]);
 
@@ -184,20 +130,20 @@ impl ConditionallySelectable for FieldElement2625x4 {
 impl FieldElement2625x4 {
     pub const ZERO: FieldElement2625x4 = FieldElement2625x4([u32x8::splat_const::<0>(); 5]);
 
-    /// Split this vector into an array of four (serial) field
-    /// elements.
-    #[rustfmt::skip] // keep alignment of extracted lanes
+    /// Split this vector into four serial field elements
+    #[rustfmt::skip]
     pub fn split(&self) -> [FieldElement51; 4] {
         let mut out = [FieldElement51::ZERO; 4];
         for i in 0..5 {
-            let a_2i   = self.0[i].extract::<0>() as u64; //
-            let b_2i   = self.0[i].extract::<1>() as u64; //
-            let a_2i_1 = self.0[i].extract::<2>() as u64; // `.
-            let b_2i_1 = self.0[i].extract::<3>() as u64; //  | pre-swapped to avoid
-            let c_2i   = self.0[i].extract::<4>() as u64; //  | a cross lane shuffle
-            let d_2i   = self.0[i].extract::<5>() as u64; // .'
-            let c_2i_1 = self.0[i].extract::<6>() as u64; //
-            let d_2i_1 = self.0[i].extract::<7>() as u64; //
+            // The middle lanes are stored pre-swapped so no cross-lane shuffle is needed
+            let a_2i   = self.0[i].extract::<0>() as u64;
+            let b_2i   = self.0[i].extract::<1>() as u64;
+            let a_2i_1 = self.0[i].extract::<2>() as u64;
+            let b_2i_1 = self.0[i].extract::<3>() as u64;
+            let c_2i   = self.0[i].extract::<4>() as u64;
+            let d_2i   = self.0[i].extract::<5>() as u64;
+            let c_2i_1 = self.0[i].extract::<6>() as u64;
+            let d_2i_1 = self.0[i].extract::<7>() as u64;
 
             out[0].0[i] = a_2i + (a_2i_1 << 26);
             out[1].0[i] = b_2i + (b_2i_1 << 26);
@@ -208,11 +154,7 @@ impl FieldElement2625x4 {
         out
     }
 
-    /// Rearrange the elements of this vector according to `control`.
-    ///
-    /// The `control` parameter should be a compile-time constant, so
-    /// that when this function is inlined, LLVM is able to lower the
-    /// shuffle using an immediate.
+    /// Rearrange the lanes by `control`, which should be a compile-time constant
     #[inline]
     pub fn shuffle(&self, control: Shuffle) -> FieldElement2625x4 {
         #[inline(always)]
@@ -232,9 +174,7 @@ impl FieldElement2625x4 {
                     Shuffle::BACD => u32x8::new(1, 0, 3, 2, 4, 5, 6, 7),
                     Shuffle::ABDC => u32x8::new(0, 1, 2, 3, 5, 4, 7, 6),
                 };
-                // Note that this gets turned into a generic LLVM
-                // shuffle-by-constants, which can be lowered to a simpler
-                // instruction than a generic permute.
+                // LLVM lowers this constant permute to a cheaper shuffle
                 _mm256_permutevar8x32_epi32(x.into(), c.into()).into()
             }
         }
@@ -248,11 +188,7 @@ impl FieldElement2625x4 {
         ])
     }
 
-    /// Blend `self` with `other`, taking lanes specified in `control` from `other`.
-    ///
-    /// The `control` parameter should be a compile-time constant, so
-    /// that this function can be inlined and LLVM can lower it to a
-    /// blend instruction using an immediate.
+    /// Take the lanes in `control` from `other`, which should be a compile-time constant
     #[inline]
     pub fn blend(&self, other: FieldElement2625x4, control: Lanes) -> FieldElement2625x4 {
         #[inline(always)]
@@ -260,26 +196,7 @@ impl FieldElement2625x4 {
             unsafe {
                 use core::arch::x86_64::_mm256_blend_epi32;
 
-                // This would be much cleaner if we could factor out the match
-                // statement on the control. Unfortunately, rustc forgets
-                // constant-info very quickly, so we can't even write
-                // ```
-                // match control {
-                //     Lanes::C => {
-                //         let imm = C_LANES as i32;
-                //         _mm256_blend_epi32(..., imm)
-                // ```
-                // let alone
-                // ```
-                // let imm = match control {
-                //     Lanes::C => C_LANES as i32,
-                // }
-                // _mm256_blend_epi32(..., imm)
-                // ```
-                // even though both of these would be constant-folded by LLVM
-                // at a lower level (as happens in the shuffle implementation,
-                // which does not require a shuffle immediate but *is* lowered
-                // to immediate shuffles anyways).
+                // Each arm spells out its immediate because rustc loses the constant otherwise
                 match control {
                     Lanes::C => _mm256_blend_epi32(x.into(), y.into(), C_LANES as i32).into(),
                     Lanes::D => _mm256_blend_epi32(x.into(), y.into(), D_LANES as i32).into(),
@@ -317,17 +234,13 @@ impl FieldElement2625x4 {
         ])
     }
 
-    /// Convenience wrapper around `new(x,x,x,x)`.
+    /// Put the same field element in all four lanes
     pub fn splat(x: &FieldElement51) -> FieldElement2625x4 {
         FieldElement2625x4::new(x, x, x, x)
     }
 
-    /// Create a `FieldElement2625x4` from four `FieldElement51`s.
-    ///
-    /// # Postconditions
-    ///
-    /// The resulting `FieldElement2625x4` is bounded with \\( b < 0.0002 \\).
-    #[rustfmt::skip] // keep alignment of computed lanes
+    /// Pack four serial field elements, with the result bounded by b < 0.0002
+    #[rustfmt::skip]
     pub fn new(
         x0: &FieldElement51,
         x1: &FieldElement51,
@@ -350,27 +263,14 @@ impl FieldElement2625x4 {
             buf[i] = u32x8::new(a_2i, b_2i, a_2i_1, b_2i_1, c_2i, d_2i, c_2i_1, d_2i_1);
         }
 
-        // We don't know that the original `FieldElement51`s were
-        // fully reduced, so the odd limbs may exceed 2^25.
-        // Reduce them to be sure.
+        // The inputs may be unreduced, so the odd limbs can exceed 2^25
         FieldElement2625x4(buf).reduce()
     }
 
-    /// Given \\((A,B,C,D)\\), compute \\((-A,-B,-C,-D)\\), without
-    /// performing a reduction.
-    ///
-    /// # Preconditions
-    ///
-    /// The coefficients of `self` must be bounded with \\( b < 0.999 \\).
-    ///
-    /// # Postconditions
-    ///
-    /// The coefficients of the result are bounded with \\( b < 1 \\).
+    /// Negate all four lanes without reducing, from b < 0.999 to b < 1
     #[inline]
     pub fn negate_lazy(&self) -> FieldElement2625x4 {
-        // The limbs of self are bounded with b < 0.999, while the
-        // smallest limb of 2*p is 67108845 > 2^{26+0.9999}, so
-        // underflows are not possible.
+        // The smallest limb of 2p exceeds every input limb, so no lane underflows
         FieldElement2625x4([
             P_TIMES_2_LO - self.0[0],
             P_TIMES_2_HI - self.0[1],
@@ -380,30 +280,15 @@ impl FieldElement2625x4 {
         ])
     }
 
-    /// Given `self = (A,B,C,D)`, compute `(B - A, B + A, D - C, D + C)`.
-    ///
-    /// # Preconditions
-    ///
-    /// The coefficients of `self` must be bounded with \\( b < 0.01 \\).
-    ///
-    /// # Postconditions
-    ///
-    /// The coefficients of the result are bounded with \\( b < 1.6 \\).
+    /// Map (A, B, C, D) to (B - A, B + A, D - C, D + C), from b < 0.01 to b < 1.6
     #[inline]
     pub fn diff_sum(&self) -> FieldElement2625x4 {
-        // tmp1 = (B, A, D, C)
         let tmp1 = self.shuffle(Shuffle::BADC);
-        // tmp2 = (-A, B, -C, D)
         let tmp2 = self.blend(self.negate_lazy(), Lanes::AC);
-        // (B - A, B + A, D - C, D + C) bounded with b < 1.6
         tmp1 + tmp2
     }
 
-    /// Reduce this vector of field elements \\(\mathrm{mod} p\\).
-    ///
-    /// # Postconditions
-    ///
-    /// The coefficients of the result are bounded with \\( b < 0.0002 \\).
+    /// Reduce all four lanes mod p to b < 0.0002
     #[inline]
     pub fn reduce(&self) -> FieldElement2625x4 {
         let shifts = u32x8::new(26, 26, 25, 25, 26, 26, 25, 25);
@@ -418,12 +303,7 @@ impl FieldElement2625x4 {
             (1 << 25) - 1,
         );
 
-        // Let c(x) denote the carryout of the coefficient x.
-        //
-        // Given    (   x0,    y0,    x1,    y1,    z0,    w0,    z1,    w1),
-        // compute  (c(x1), c(y1), c(x0), c(y0), c(z1), c(w1), c(z0), c(w0)).
-        //
-        // The carryouts are bounded by 2^(32 - 25) = 2^7.
+        // Each limb's overflow lands in the slot of the limb it feeds, and fits in 7 bits
         let rotated_carryout = |v: u32x8| -> u32x8 {
             unsafe {
                 use core::arch::x86_64::_mm256_shuffle_epi32;
@@ -434,20 +314,7 @@ impl FieldElement2625x4 {
             }
         };
 
-        // Combine (lo, lo, lo, lo, lo, lo, lo, lo)
-        //    with (hi, hi, hi, hi, hi, hi, hi, hi)
-        //      to (lo, lo, hi, hi, lo, lo, hi, hi)
-        //
-        // This allows combining carryouts, e.g.,
-        //
-        // lo  (c(x1), c(y1), c(x0), c(y0), c(z1), c(w1), c(z0), c(w0))
-        // hi  (c(x3), c(y3), c(x2), c(y2), c(z3), c(w3), c(z2), c(w2))
-        // ->  (c(x1), c(y1), c(x2), c(y2), c(z1), c(w1), c(z2), c(w2))
-        //
-        // which is exactly the vector of carryins for
-        //
-        //     (   x2,    y2,    x3,    y3,    z2,    w2,    z3,    w3).
-        //
+        // Take the low half of each overflow pair from one vector and the high half from the next
         let combine = |v_lo: u32x8, v_hi: u32x8| -> u32x8 {
             unsafe {
                 use core::arch::x86_64::_mm256_blend_epi32;
@@ -476,101 +343,61 @@ impl FieldElement2625x4 {
             use core::arch::x86_64::_mm256_mul_epu32;
             use core::arch::x86_64::_mm256_shuffle_epi32;
 
-            // Need to rearrange c98, since vpmuludq uses the low
-            // 32-bits of each 64-bit lane to compute the product:
-            //
-            // c98       = (c(x9), c(y9), c(x8), c(y8), c(z9), c(w9), c(z8), c(w8));
-            // c9_spread = (c(x9), c(x8), c(y9), c(y8), c(z9), c(z8), c(w9), c(w8)).
+            // vpmuludq reads the low 32 bits of each 64-bit lane, so spread the top overflow first
             let c9_spread = _mm256_shuffle_epi32(c98.into(), 0b11_01_10_00);
 
-            // Since the carryouts are bounded by 2^7, their products with 19
-            // are bounded by 2^11.25.  This means that
-            //
-            // c9_19_spread = (19*c(x9), 0, 19*c(y9), 0, 19*c(z9), 0, 19*c(w9), 0).
             let c9_19_spread = _mm256_mul_epu32(c9_spread, u64x4::splat(19).into());
 
-            // Unshuffle:
-            // c9_19 = (19*c(x9), 19*c(y9), 0, 0, 19*c(z9), 19*c(w9), 0, 0).
             _mm256_shuffle_epi32(c9_19_spread, 0b11_01_10_00).into()
         };
 
-        // Add the final carryin.
         v[0] += c9_19;
 
-        // Each output coefficient has exactly one carryin, which is
-        // bounded by 2^11.25, so they are bounded as
-        //
-        // c_even < 2^26 + 2^11.25 < 26.00006 < 2^{26+b}
-        // c_odd  < 2^25 + 2^11.25 < 25.0001  < 2^{25+b}
-        //
-        // where b = 0.0002.
+        // Each limb gains one overflow below 2^11.25, which keeps b < 0.0002
         FieldElement2625x4(v)
     }
 
-    /// Given an array of wide coefficients, reduce them to a `FieldElement2625x4`.
-    ///
-    /// # Postconditions
-    ///
-    /// The coefficients of the result are bounded with \\( b < 0.007 \\).
+    /// Reduce ten wide limbs to a vector bounded by b < 0.007
     #[inline]
-    #[rustfmt::skip] // keep alignment of carry chain
+    #[rustfmt::skip]
     fn reduce64(mut z: [u64x4; 10]) -> FieldElement2625x4 {
-        // These aren't const because splat isn't a const fn
         let LOW_25_BITS: u64x4 = u64x4::splat((1 << 25) - 1);
         let LOW_26_BITS: u64x4 = u64x4::splat((1 << 26) - 1);
 
-        // Carry the value from limb i = 0..8 to limb i+1
+        // Move the high bits of limb i into limb i + 1
         let carry = |z: &mut [u64x4; 10], i: usize| {
             debug_assert!(i < 9);
             if i.is_multiple_of(2) {
-                // Even limbs have 26 bits
                 z[i + 1] += z[i].shr::<26>();
                 z[i] &= LOW_26_BITS;
             } else {
-                // Odd limbs have 25 bits
                 z[i + 1] += z[i].shr::<25>();
                 z[i] &= LOW_25_BITS;
             }
         };
 
-        // Perform two halves of the carry chain in parallel.
+        // Run the two halves of the chain side by side
         carry(&mut z, 0); carry(&mut z, 4);
         carry(&mut z, 1); carry(&mut z, 5);
         carry(&mut z, 2); carry(&mut z, 6);
         carry(&mut z, 3); carry(&mut z, 7);
-        // Since z[3] < 2^64, c < 2^(64-25) = 2^39,
-        // so    z[4] < 2^26 + 2^39 < 2^39.0002
         carry(&mut z, 4); carry(&mut z, 8);
-        // Now z[4] < 2^26
-        // and z[5] < 2^25 + 2^13.0002 < 2^25.0004 (good enough)
 
-        // Last carry has a multiplication by 19.  In the serial case we
-        // do a 64-bit multiplication by 19, but here we want to do a
-        // 32-bit multiplication.  However, if we only know z[9] < 2^64,
-        // the carry is bounded as c < 2^(64-25) = 2^39, which is too
-        // big.  To ensure c < 2^32, we would need z[9] < 2^57.
-        // Instead, we split the carry in two, with c = c_0 + c_1*2^26.
-
+        // The top overflow can reach 2^39, so split it in two to multiply by 19 in 32 bits
         let c = z[9].shr::<25>();
         z[9] &= LOW_25_BITS;
-        let mut c0: u64x4 = c & LOW_26_BITS; // c0 < 2^26;
-        let mut c1: u64x4 = c.shr::<26>();         // c1 < 2^(39-26) = 2^13;
+        let mut c0: u64x4 = c & LOW_26_BITS;
+        let mut c1: u64x4 = c.shr::<26>();
 
         let x19 = u64x4::splat(19);
         c0 = u32x8::from(c0).mul32(u32x8::from(x19));
         c1 = u32x8::from(c1).mul32(u32x8::from(x19));
 
-        z[0] += c0; // z0 < 2^26 + 2^30.25 < 2^30.33
-        z[1] += c1; // z1 < 2^25 + 2^17.25 < 2^25.0067
-        carry(&mut z, 0); // z0 < 2^26, z1 < 2^25.0067 + 2^4.33 = 2^25.007
+        z[0] += c0;
+        z[1] += c1;
+        carry(&mut z, 0);
 
-        // The output coefficients are bounded with
-        //
-        // b = 0.007  for z[1]
-        // b = 0.0004 for z[5]
-        // b = 0      for other z[i].
-        //
-        // So the packed result is bounded with b = 0.007.
+        // z[1] is the loosest limb and sets the bound b = 0.007
         FieldElement2625x4([
             repack_pair(z[0].into(), z[1].into()),
             repack_pair(z[2].into(), z[3].into()),
@@ -580,16 +407,8 @@ impl FieldElement2625x4 {
         ])
     }
 
-    /// Square this field element, and negate the result's \\(D\\) value.
-    ///
-    /// # Preconditions
-    ///
-    /// The coefficients of `self` must be bounded with \\( b < 1.5 \\).
-    ///
-    /// # Postconditions
-    ///
-    /// The coefficients of the result are bounded with \\( b < 0.007 \\).
-    #[rustfmt::skip] // keep alignment of z* calculations
+    /// Square all four lanes and negate lane D, from b < 1.5 to b < 0.007
+    #[rustfmt::skip]
     pub fn square_and_negate_D(&self) -> FieldElement2625x4 {
         #[inline(always)]
         fn m(x: u32x8, y: u32x8) -> u64x4 {
@@ -635,22 +454,7 @@ impl FieldElement2625x4 {
         let mut z8 = m(x0_2, x8) + m(x1_2,  x7_2) + m(x2_2,    x6) +   m(x3_2,  x5_2) +   m(x4,      x4) +  ((m(x9,   x9_19)).shl::<1>());
         let mut z9 = m(x0_2, x9) + m(x1_2,    x8) + m(x2_2,    x7) +   m(x3_2,    x6) +   m(x4_2,    x5)                                 ;
 
-        // The biggest z_i is bounded as z_i < 249*2^(51 + 2*b);
-        // if b < 1.5 we get z_i < 4485585228861014016.
-        //
-        // The limbs of the multiples of p are bounded above by
-        //
-        // 0x3fffffff << 37 = 9223371899415822336 < 2^63
-        //
-        // and below by
-        //
-        // 0x1fffffff << 37 = 4611685880988434432
-        //                  > 4485585228861014016
-        //
-        // So these multiples of p are big enough to avoid underflow
-        // in subtraction, and small enough to fit within u64
-        // with room for a carry.
-
+        // These multiples of p exceed every z_i and still leave headroom in a u64
         let low__p37 = u64x4::splat(0x3ffffed << 37);
         let even_p37 = u64x4::splat(0x3ffffff << 37);
         let odd__p37 = u64x4::splat(0x1ffffff << 37);
@@ -681,18 +485,7 @@ impl FieldElement2625x4 {
 impl Neg for FieldElement2625x4 {
     type Output = FieldElement2625x4;
 
-    /// Negate this field element, performing a reduction.
-    ///
-    /// If the coefficients are known to be small, use `negate_lazy`
-    /// to avoid performing a reduction.
-    ///
-    /// # Preconditions
-    ///
-    /// The coefficients of `self` must be bounded with \\( b < 4.0 \\).
-    ///
-    /// # Postconditions
-    ///
-    /// The coefficients of the result are bounded with \\( b < 0.0002 \\).
+    /// Negate and reduce all four lanes, from b < 4.0 to b < 0.0002
     #[inline]
     fn neg(self) -> FieldElement2625x4 {
         FieldElement2625x4([
@@ -709,7 +502,7 @@ impl Neg for FieldElement2625x4 {
 #[unsafe_target_feature("avx2")]
 impl Add<FieldElement2625x4> for FieldElement2625x4 {
     type Output = FieldElement2625x4;
-    /// Add two `FieldElement2625x4`s, without performing a reduction.
+    /// Add lane by lane without reducing
     #[inline]
     fn add(self, rhs: FieldElement2625x4) -> FieldElement2625x4 {
         FieldElement2625x4([
@@ -725,11 +518,7 @@ impl Add<FieldElement2625x4> for FieldElement2625x4 {
 #[unsafe_target_feature("avx2")]
 impl Mul<(u32, u32, u32, u32)> for FieldElement2625x4 {
     type Output = FieldElement2625x4;
-    /// Perform a multiplication by a vector of small constants.
-    ///
-    /// # Postconditions
-    ///
-    /// The coefficients of the result are bounded with \\( b < 0.007 \\).
+    /// Multiply each lane by its own small constant, with the result bounded by b < 0.007
     #[inline]
     fn mul(self, scalars: (u32, u32, u32, u32)) -> FieldElement2625x4 {
         let consts = u32x8::new(scalars.0, 0, scalars.1, 0, scalars.2, 0, scalars.3, 0);
@@ -758,19 +547,8 @@ impl Mul<(u32, u32, u32, u32)> for FieldElement2625x4 {
 #[unsafe_target_feature("avx2")]
 impl Mul<&FieldElement2625x4> for &FieldElement2625x4 {
     type Output = FieldElement2625x4;
-    /// Multiply `self` by `rhs`.
-    ///
-    /// # Preconditions
-    ///
-    /// The coefficients of `self` must be bounded with \\( b < 2.5 \\).
-    ///
-    /// The coefficients of `rhs` must be bounded with \\( b < 1.75 \\).
-    ///
-    /// # Postconditions
-    ///
-    /// The coefficients of the result are bounded with \\( b < 0.007 \\).
-    ///
-    #[rustfmt::skip] // keep alignment of z* calculations
+    /// Multiply lane by lane, with `self` below b < 2.5, `rhs` below b < 1.75 and the result below b < 0.007
+    #[rustfmt::skip]
     #[inline]
     fn mul(self, rhs: &FieldElement2625x4) -> FieldElement2625x4 {
         #[inline(always)]
@@ -819,9 +597,10 @@ impl Mul<&FieldElement2625x4> for &FieldElement2625x4 {
 
         let v19 = u32x8::new(19, 0, 19, 0, 19, 0, 19, 0);
 
-        let y1_19 = m_lo(v19, y1); // This fits in a u32
-        let y2_19 = m_lo(v19, y2); // iff 26 + b + lg(19) < 32
-        let y3_19 = m_lo(v19, y3); // if  b < 32 - 26 - 4.248 = 1.752
+        // 19 times a limb fits in a u32 while b < 1.752
+        let y1_19 = m_lo(v19, y1);
+        let y2_19 = m_lo(v19, y2);
+        let y3_19 = m_lo(v19, y3);
         let y4_19 = m_lo(v19, y4);
         let y5_19 = m_lo(v19, y5);
         let y6_19 = m_lo(v19, y6);
@@ -829,7 +608,7 @@ impl Mul<&FieldElement2625x4> for &FieldElement2625x4 {
         let y8_19 = m_lo(v19, y8);
         let y9_19 = m_lo(v19, y9);
 
-        // Doubling odd x limbs fits in a u32 iff 25 + b + 1 < 32, i.e. b < 6.
+        // Doubling an odd limb fits in a u32 while b < 6
         let z0 = sum10(m(x0, y0), m(twice(x1), y9_19), m(x2, y8_19), m(twice(x3), y7_19), m(x4, y6_19), m(twice(x5), y5_19), m(x6, y4_19), m(twice(x7), y3_19), m(x8, y2_19), m(twice(x9), y1_19));
         let z1 = sum10(m(x0, y1), m(x1,      y0), m(x2, y9_19), m(x3,   y8_19), m(x4, y7_19), m(x5,   y6_19), m(x6, y5_19), m(x7,   y4_19), m(x8, y3_19), m(x9,   y2_19));
         let z2 = sum10(m(x0, y2), m(twice(x1),    y1), m(x2,    y0), m(twice(x3), y9_19), m(x4, y8_19), m(twice(x5), y7_19), m(x6, y6_19), m(twice(x7), y5_19), m(x8, y4_19), m(twice(x9), y3_19));
@@ -841,44 +620,7 @@ impl Mul<&FieldElement2625x4> for &FieldElement2625x4 {
         let z8 = sum10(m(x0, y8), m(twice(x1),    y7), m(x2,    y6), m(twice(x3),    y5), m(x4,    y4), m(twice(x5),    y3), m(x6,    y2), m(twice(x7),    y1), m(x8,    y0), m(twice(x9), y9_19));
         let z9 = sum10(m(x0, y9), m(x1,      y8), m(x2,    y7), m(x3,      y6), m(x4,    y5), m(x5,      y4), m(x6,    y3), m(x7,      y2), m(x8,    y1), m(x9,      y0));
 
-        // The bounds on z[i] are the same as in the serial 32-bit code
-        // and the comment below is copied from there:
-
-        // How big is the contribution to z[i+j] from x[i], y[j]?
-        //
-        // Using the bounds above, we get:
-        //
-        // i even, j even:   x[i]*y[j] <   2^(26+b)*2^(26+b) = 2*2^(51+2*b)
-        // i  odd, j even:   x[i]*y[j] <   2^(25+b)*2^(26+b) = 1*2^(51+2*b)
-        // i even, j  odd:   x[i]*y[j] <   2^(26+b)*2^(25+b) = 1*2^(51+2*b)
-        // i  odd, j  odd: 2*x[i]*y[j] < 2*2^(25+b)*2^(25+b) = 1*2^(51+2*b)
-        //
-        // We perform inline reduction mod p by replacing 2^255 by 19
-        // (since 2^255 - 19 = 0 mod p).  This adds a factor of 19, so
-        // we get the bounds (z0 is the biggest one, but calculated for
-        // posterity here in case finer estimation is needed later):
-        //
-        //  z0 < ( 2 + 1*19 + 2*19 + 1*19 + 2*19 + 1*19 + 2*19 + 1*19 + 2*19 + 1*19 )*2^(51 + 2b) = 249*2^(51 + 2*b)
-        //  z1 < ( 1 +  1   + 1*19 + 1*19 + 1*19 + 1*19 + 1*19 + 1*19 + 1*19 + 1*19 )*2^(51 + 2b) = 154*2^(51 + 2*b)
-        //  z2 < ( 2 +  1   +  2   + 1*19 + 2*19 + 1*19 + 2*19 + 1*19 + 2*19 + 1*19 )*2^(51 + 2b) = 195*2^(51 + 2*b)
-        //  z3 < ( 1 +  1   +  1   +  1   + 1*19 + 1*19 + 1*19 + 1*19 + 1*19 + 1*19 )*2^(51 + 2b) = 118*2^(51 + 2*b)
-        //  z4 < ( 2 +  1   +  2   +  1   +  2   + 1*19 + 2*19 + 1*19 + 2*19 + 1*19 )*2^(51 + 2b) = 141*2^(51 + 2*b)
-        //  z5 < ( 1 +  1   +  1   +  1   +  1   +  1   + 1*19 + 1*19 + 1*19 + 1*19 )*2^(51 + 2b) =  82*2^(51 + 2*b)
-        //  z6 < ( 2 +  1   +  2   +  1   +  2   +  1   +  2   + 1*19 + 2*19 + 1*19 )*2^(51 + 2b) =  87*2^(51 + 2*b)
-        //  z7 < ( 1 +  1   +  1   +  1   +  1   +  1   +  1   +  1   + 1*19 + 1*19 )*2^(51 + 2b) =  46*2^(51 + 2*b)
-        //  z8 < ( 2 +  1   +  2   +  1   +  2   +  1   +  2   +  1   +  2   + 1*19 )*2^(51 + 2b) =  33*2^(51 + 2*b)
-        //  z9 < ( 1 +  1   +  1   +  1   +  1   +  1   +  1   +  1   +  1   +  1   )*2^(51 + 2b) =  10*2^(51 + 2*b)
-        //
-        // So z[0] fits into a u64 if 51 + 2*b + lg(249) < 64
-        //                         if b < 2.5.
-
-        // In fact this bound is slightly sloppy, since it treats both
-        // inputs x and y as being bounded by the same parameter b,
-        // while they are in fact bounded by b_x and b_y, and we
-        // already require that b_y < 1.75 in order to fit the
-        // multiplications by 19 into a u32.  The tighter bound on b_y
-        // means we could get a tighter bound on the outputs, or a
-        // looser bound on b_x.
+        // The largest sum is z0 below 249 * 2^(51 + 2b), which fits in a u64 while b < 2.5
         FieldElement2625x4::reduce64([z0, z1, z2, z3, z4, z5, z6, z7, z8, z9])
     }
 }

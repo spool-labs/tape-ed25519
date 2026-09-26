@@ -1,32 +1,25 @@
-// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause. See LICENSE.
+//! Traits shared by the point and scalar types
 
-//! Module for common traits.
+// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
 use crate::scalar::Scalar;
 use subtle::ConstantTimeEq;
 
-// ------------------------------------------------------------------------
-// Public Traits
-// ------------------------------------------------------------------------
-
-/// Trait for getting the identity element of a point type.
+/// A point type with an identity element
 pub trait Identity {
-    /// Returns the identity element of the curve.
-    /// Can be used as a constructor.
+    /// The identity element of the curve
     fn identity() -> Self;
 }
 
-/// Trait for testing if a curve point is equivalent to the identity point.
+/// A check for the identity element
 pub trait IsIdentity {
-    /// Return true if this element is the identity element of the curve.
+    /// Return true when this element is the identity
     fn is_identity(&self) -> bool;
 }
 
-/// Implement generic identity equality testing for a point representations
-/// which have constant-time equality testing and a defined identity
-/// constructor.
+/// Any point with constant-time equality and an identity compares against the identity
 impl<Point> IsIdentity for Point
 where
     Point: ConstantTimeEq + Identity,
@@ -36,50 +29,30 @@ where
     }
 }
 
-/// A precomputed table of basepoints, for optimising scalar multiplications.
+/// A precomputed table of basepoint multiples for fixed-base multiplication
 pub trait BasepointTable {
-    /// The type of point contained within this table.
+    /// The point type the table holds
     type Point;
 
-    /// Generate a new precomputed basepoint table from the given basepoint.
+    /// Build a table from `basepoint`
     fn create(basepoint: &Self::Point) -> Self;
 
-    /// Retrieve the original basepoint from this table.
+    /// Recover the basepoint the table was built from
     fn basepoint(&self) -> Self::Point;
 
-    /// Multiply a `scalar` by this precomputed basepoint table, in constant time.
+    /// Multiply the basepoint by `scalar` in constant time
     fn mul_base(&self, scalar: &Scalar) -> Self::Point;
 }
 
-/// A trait for decomposing scalars for the HEEA method.
-///
-/// The HEEA method is used by EdDSA verification to replace multiplication by
-/// a full-width challenge scalar with multiplications by two shorter scalars.
-/// For a challenge scalar `h`, the decomposition returns non-negative scalars
-/// `rho` and `tau` that satisfy either `rho == tau * h (mod ell)` or
-/// `rho == -tau * h (mod ell)`.
-///
-/// This trait provides a method for performing this decomposition.
+/// Split a challenge scalar h into half-size rho and tau with rho equal to plus or minus tau h mod l
 pub trait HEEADecomposition {
-    /// Decomposes a scalar `h` into two approximately half-size scalars.
-    ///
-    /// Returns `(rho, tau, flip_h)`. If `flip_h` is false, then
-    /// `rho == tau * h (mod ell)`. If `flip_h` is true, then
-    /// `rho == -tau * h (mod ell)`.
+    /// Return `(rho, tau, flip_h)`, where `flip_h` is true when rho equals -tau h mod l
     fn heea_decompose(&self) -> (Scalar, Scalar, bool);
 }
 
-// ------------------------------------------------------------------------
-// Private Traits
-// ------------------------------------------------------------------------
-
-/// Trait for checking whether a point is on the curve.
-///
-/// This trait is only for debugging/testing, since it should be
-/// impossible for a `curve25519-dalek` user to construct an invalid
-/// point.
+/// A check that a point lies on the curve, used by tests
 #[cfg(test)]
 pub trait ValidityCheck {
-    /// Checks whether the point is on the curve. Not CT.
+    /// Return true when the point lies on the curve, in variable time
     fn is_valid(&self) -> bool;
 }

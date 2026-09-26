@@ -1,16 +1,9 @@
-// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause. See LICENSE.
+//! Multibuffer SHA-512 in AVX-512, one message per 64-bit lane for eight or sixteen messages
 
-//! Eight- and sixteen-message multibuffer SHA-512 in AVX-512 intrinsics.
-//!
-//! One message per 64-bit lane. Lanes of different lengths run to the longest
-//! lane's block count with per-lane masked state updates, so a shorter lane
-//! freezes after its final padded block. A SHA-512 round is a serial chain on
-//! `a` and `e`, so two independent groups of eight run through the same round
-//! bodies interleaved, which is what [`challenge_digests_x16`] is for.
+// Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
 #![allow(clippy::needless_range_loop)]
-// Nightly and stable currently disagree on the requirement of unsafe blocks
-// when intrinsics are called inside `#[target_feature]` functions.
+// Stable and nightly disagree on unsafe blocks for intrinsics inside target_feature functions
 #![allow(unused_unsafe)]
 
 use core::arch::x86_64::{
@@ -47,12 +40,11 @@ const K64: [u64; 80] = [
     0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817,
 ];
 
-/// Cache-line aligned so every row is a legal aligned 512-bit load.
+/// Round constants with each row aligned for a 512-bit aligned load
 #[repr(align(64))]
 struct KLanes([[u64; LANES]; 80]);
 
-/// The round constants pre-broadcast across the lanes: a load instead of a
-/// broadcast, both one uop, here so the compiler cannot decide otherwise.
+/// The round constants broadcast across the lanes ahead of time so each round does one load
 static K64_X8: KLanes = {
     let mut rows = [[0u64; LANES]; 80];
     let mut t = 0;
@@ -73,14 +65,13 @@ const H512: [u64; 8] = [
     0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179,
 ];
 
-/// The SHA-512 block size in bytes.
+/// The SHA-512 block size in bytes
 const BLOCK: usize = 128;
 
-/// Blocks staged per lane: the `R || A` prefix block plus the one or two padding
-/// blocks. Everything between them is read where it lies.
+/// Each lane stages the `R || A` prefix block and up to two padding blocks
 const STAGE_BLOCKS: usize = 3;
 
-/// `VPSHUFB` control reversing each 64-bit group, applied per 128-bit lane.
+/// The `VPSHUFB` control that reverses the bytes of each 64-bit word
 #[rustfmt::skip]
 const BSWAP64: [u8; 64] = [
     7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8,
@@ -89,8 +80,7 @@ const BSWAP64: [u8; 64] = [
     7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8,
 ];
 
-/// Transpose eight 64-byte lane rows into eight per-word vectors, byte-swapped
-/// into the big-endian values the schedule operates on.
+/// Transpose eight 64-byte lane rows into eight big-endian word vectors
 #[target_feature(enable = "avx512f,avx512bw")]
 #[inline]
 unsafe fn transpose_words_x8(rows: &[__m512i; 8], bswap: __m512i) -> [__m512i; 8] {
@@ -126,17 +116,17 @@ unsafe fn transpose_words_x8(rows: &[__m512i; 8], bswap: __m512i) -> [__m512i; 8
     }
 }
 
-/// One group's staged blocks and per-lane block plan.
+/// Staged blocks and the block plan for one group of eight lanes
 struct Staged {
-    /// The `R || A` prefix block and the padded tail, per lane.
+    /// The `R || A` prefix block and the padded tail, per lane
     stage: [[MaybeUninit<u8>; STAGE_BLOCKS * BLOCK]; LANES],
-    /// Padded block count, per lane.
+    /// Padded block count, per lane
     blocks: [usize; LANES],
-    /// Index of the block holding the `0x80` marker, per lane.
+    /// Index of the block that holds the `0x80` marker, per lane
     pad_block: [usize; LANES],
-    /// Stage slot that marker block sits in, per lane.
+    /// Stage slot of the marker block, per lane
     pad_slot: [usize; LANES],
-    /// The longest lane's block count.
+    /// Block count of the longest lane
     max_blocks: usize,
 }
 
@@ -151,8 +141,7 @@ impl Staged {
         }
     }
 
-    /// Stage `R || A || M` per lane: block 0 and the padded tail are copied,
-    /// the middle of the message is hashed where it lies.
+    /// Stage block 0 and the padded tail of `R || A || M` per lane, leaving the middle in place
     fn fill(
         &mut self,
         r_bytes: &[[u8; 32]; LANES],
@@ -166,7 +155,6 @@ impl Staged {
             self.blocks[l] = padded / BLOCK;
             self.max_blocks = self.max_blocks.max(self.blocks[l]);
 
-            // The block holding the 0x80 marker, and where it is staged.
             let pb = len / BLOCK;
             self.pad_block[l] = pb;
             self.pad_slot[l] = usize::from(pb != 0);
@@ -190,8 +178,7 @@ impl Staged {
                 *pad.add(used) = 0x80;
                 core::ptr::write_bytes(pad.add(used + 1), 0, BLOCK - used - 1);
 
-                // The 128-bit length lands in the final block, one past the
-                // marker's block when the marker left no room.
+                // The length goes one block past the marker when the marker block has no room
                 let last = base.add((self.pad_slot[l] + self.blocks[l] - 1 - pb) * BLOCK);
                 if last != pad {
                     core::ptr::write_bytes(last, 0, BLOCK - 8);
@@ -205,8 +192,7 @@ impl Staged {
         }
     }
 
-    /// Block `b`'s source pointer per lane, and the mask of lanes still inside
-    /// their stream. Spent lanes read `zero` and are masked out of the update.
+    /// Return block `b`'s pointer per lane and a mask of live lanes, with spent lanes reading `zero`
     #[inline]
     fn block(&self, msgs: &[&[u8]; LANES], b: usize, zero: *const u8) -> ([*const u8; LANES], u8) {
         let mut active: u8 = 0;
@@ -231,14 +217,14 @@ impl Staged {
     }
 }
 
-/// The initial SHA-512 state, one message per lane.
+/// The initial SHA-512 state, one message per lane
 #[target_feature(enable = "avx512f")]
 #[inline]
 unsafe fn init_state() -> [__m512i; 8] {
     unsafe { core::array::from_fn(|i| _mm512_set1_epi64(H512[i] as i64)) }
 }
 
-/// The block's sixteen schedule words, transposed out of the lane rows.
+/// Load the block's sixteen schedule words, transposed out of the lane rows
 #[target_feature(enable = "avx512f,avx512bw")]
 #[inline]
 unsafe fn load_schedule(block: &[*const u8; LANES], bswap: __m512i) -> [__m512i; 16] {
@@ -255,7 +241,7 @@ unsafe fn load_schedule(block: &[*const u8; LANES], bswap: __m512i) -> [__m512i;
     }
 }
 
-/// Extract per-lane big-endian digests.
+/// Extract the big-endian digest of each lane
 #[target_feature(enable = "avx512f")]
 #[inline]
 unsafe fn digests(state: &[__m512i; 8]) -> [[u8; 64]; LANES] {
@@ -274,12 +260,7 @@ unsafe fn digests(state: &[__m512i; 8]) -> [[u8; 64]; LANES] {
     }
 }
 
-/// Compute the eight digests `SHA-512(R_l || A_l || M_l)`.
-///
-/// # Safety
-///
-/// The caller must have verified AVX-512 support (`ifma_x8::available()`,
-/// which covers the `avx512f` and `avx512bw` operations used here).
+/// Compute the eight digests `SHA-512(R || A || M)`, once `ifma_x8::available()` holds
 #[target_feature(enable = "avx512f,avx512bw")]
 pub unsafe fn challenge_digests_x8(
     r_bytes: &[[u8; 32]; LANES],
@@ -305,13 +286,7 @@ pub unsafe fn challenge_digests_x8(
     }
 }
 
-/// [`challenge_digests_x8`] on two groups at once, their round bodies
-/// interleaved. Blocks past the shorter group's end run on the single-group
-/// body, so an uneven pair costs no more than the two groups apart.
-///
-/// # Safety
-///
-/// As [`challenge_digests_x8`].
+/// Compute the digests of two groups with their rounds interleaved, once `ifma_x8::available()` holds
 #[target_feature(enable = "avx512f,avx512bw")]
 pub unsafe fn challenge_digests_x16(
     r_bytes: &[[[u8; 32]; LANES]; 2],
@@ -369,7 +344,7 @@ mod test {
     use super::*;
     use crate::backend::lanes::ifma_x8::available;
 
-    /// The digest `sha2` gives for one lane's inputs.
+    /// The digest `sha2` gives for one lane's inputs
     fn expected(r: &[u8; 32], a: &[u8; 32], msg: &[u8]) -> [u8; 64] {
         let d = Sha512::new()
             .chain_update(r)
@@ -381,7 +356,7 @@ mod test {
         out
     }
 
-    /// xorshift64, so a failing round replays from its index alone.
+    /// An xorshift64 generator, so a failing round replays from its seed
     struct Rng(u64);
 
     impl Rng {
@@ -401,7 +376,7 @@ mod test {
         }
     }
 
-    /// The `R` and `A` encodings of eight lanes, and the message each one covers
+    /// The `R` and `A` encodings of eight lanes and the message each one covers
     type Group = ([[u8; 32]; LANES], [[u8; 32]; LANES], Vec<Vec<u8>>);
 
     /// One group of eight random lanes
@@ -424,7 +399,7 @@ mod test {
             return;
         }
 
-        // Hashed length is 64 + msg len, so these straddle both padding boundaries.
+        // The hashed length is 64 plus the message length, so these straddle both padding boundaries
         let msg_lens: [usize; LANES] = [0, 1, 47, 48, 63, 175, 176, 1232];
         let msgs_data: Vec<Vec<u8>> = msg_lens
             .iter()

@@ -1,4 +1,6 @@
-// Vendored from curve25519-dalek, BSD-3-Clause. See LICENSE.
+//! Extended and cached Edwards points on the AVX-512 IFMA backend, four coordinates per vector
+
+// Vendored from curve25519-dalek, BSD-3-Clause
 
 #![allow(non_snake_case)]
 
@@ -76,29 +78,19 @@ impl Identity for ExtendedPoint {
 #[unsafe_target_feature("avx512ifma,avx512vl")]
 impl ExtendedPoint {
     pub fn double(&self) -> ExtendedPoint {
-        // (Y1 X1 T1 Z1) -- uses vpshufd (1c latency @ 1/c)
+        // (Y1 X1 T1 Z1)
         let mut tmp0 = self.0.shuffle(Shuffle::BADC);
 
-        // (X1+Y1 X1+Y1 X1+Y1 X1+Y1) -- can use vpinserti128
+        // (X1+Y1 X1+Y1 X1+Y1 X1+Y1)
         let mut tmp1 = (self.0 + tmp0).shuffle(Shuffle::ABAB);
 
         // (X1 Y1 Z1 X1+Y1)
         tmp0 = self.0.blend(&tmp1, Lanes::D);
 
+        // tmp1 = (S1 S2 S3 S4)
         tmp1 = F51x4Reduced::from(tmp0).square();
-        // Now tmp1 = (S1 S2 S3 S4)
 
-        // We want to compute
-        //
-        //    + | S1 | S1 | S1 | S1 |
-        //    + | S2 |    |    | S2 |
-        //    + |    |    | S3 |    |
-        //    + |    |    | S3 |    |
-        //    + |    |16p |16p |16p |
-        //    - |    | S2 | S2 |    |
-        //    - |    |    |    | S4 |
-        //    =======================
-        //        S5   S6   S8   S9
+        // Combine the squares lane by lane into (S5 S6 S8 S9)
 
         let zero = F51x4Unreduced::ZERO;
 
@@ -129,28 +121,28 @@ impl ExtendedPoint {
 impl Add<&CachedPoint> for &ExtendedPoint {
     type Output = ExtendedPoint;
 
-    /// Add an `ExtendedPoint` and a `CachedPoint`.
+    /// Add a cached point to an extended point
     fn add(self, other: &CachedPoint) -> ExtendedPoint {
         let mut tmp = self.0;
 
-        tmp = tmp.blend(&tmp.diff_sum(), Lanes::AB);
         // tmp = (Y1-X1 Y1+X1 Z1 T1) = (S0 S1 Z1 T1)
+        tmp = tmp.blend(&tmp.diff_sum(), Lanes::AB);
 
-        tmp = &F51x4Reduced::from(tmp) * &other.0;
         // tmp = (S0*S2' S1*S3' Z1*Z2' T1*T2') = (S8 S9 S10 S11)
+        tmp = &F51x4Reduced::from(tmp) * &other.0;
 
-        tmp = tmp.shuffle(Shuffle::ABDC);
         // tmp = (S8 S9 S11 S10)
+        tmp = tmp.shuffle(Shuffle::ABDC);
 
-        let tmp = F51x4Reduced::from(tmp.diff_sum());
         // tmp = (S9-S8 S9+S8 S10-S11 S10+S11) = (S12 S13 S14 S15)
+        let tmp = F51x4Reduced::from(tmp.diff_sum());
 
-        let t0 = tmp.shuffle(Shuffle::ADDA);
         // t0 = (S12 S15 S15 S12)
-        let t1 = tmp.shuffle(Shuffle::CBCB);
+        let t0 = tmp.shuffle(Shuffle::ADDA);
         // t1 = (S14 S13 S14 S13)
+        let t1 = tmp.shuffle(Shuffle::CBCB);
 
-        // Return (S12*S14 S15*S13 S15*S14 S12*S13) = (X3 Y3 Z3 T3)
+        // (S12*S14 S15*S13 S15*S14 S12*S13) = (X3 Y3 Z3 T3)
         ExtendedPoint(&t0 * &t1)
     }
 }
@@ -194,7 +186,7 @@ impl Neg for &CachedPoint {
 impl Sub<&CachedPoint> for &ExtendedPoint {
     type Output = ExtendedPoint;
 
-    /// Implement subtraction by negating the point and adding.
+    /// Subtract a cached point by adding its negation
     fn sub(self, other: &CachedPoint) -> ExtendedPoint {
         self + &(-other)
     }
@@ -221,7 +213,6 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable5<CachedPoint> {
         for i in 0..7 {
             Ai[i + 1] = (&A2 + &Ai[i]).into();
         }
-        // Now Ai = [A, 3A, 5A, 7A, 9A, 11A, 13A, 15A]
         NafLookupTable5(Ai)
     }
 }
@@ -235,7 +226,6 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable8<CachedPoint> {
         for i in 0..63 {
             Ai[i + 1] = (&A2 + &Ai[i]).into();
         }
-        // Now Ai = [A, 3A, 5A, 7A, 9A, 11A, 13A, 15A, ..., 127A]
         NafLookupTable8(Ai)
     }
 }
@@ -246,10 +236,6 @@ mod test {
     use super::*;
 
     fn addition_test_helper(P: edwards::EdwardsPoint, Q: edwards::EdwardsPoint) {
-        // Test the serial implementation of the parallel addition formulas
-        //let R_serial: edwards::EdwardsPoint = serial_add(P.into(), Q.into()).into();
-
-        // Test the vector implementation of the parallel readdition formulas
         let cached_Q = CachedPoint::from(ExtendedPoint::from(Q));
         let R_vector: edwards::EdwardsPoint = (&ExtendedPoint::from(P) + &cached_Q).into();
         let S_vector: edwards::EdwardsPoint = (&ExtendedPoint::from(P) - &cached_Q).into();
@@ -259,11 +245,9 @@ mod test {
         println!("Q = {:?}", Q);
         println!("cached Q = {:?}", cached_Q);
         println!("R = P + Q = {:?}", &P + &Q);
-        //println!("R_serial = {:?}", R_serial);
         println!("R_vector = {:?}", R_vector);
         println!("S = P - Q = {:?}", &P - &Q);
         println!("S_vector = {:?}", S_vector);
-        //assert_eq!(R_serial.compress(), (&P + &Q).compress());
         assert_eq!(R_vector.compress(), (&P + &Q).compress());
         assert_eq!(S_vector.compress(), (&P - &Q).compress());
         println!("OK!\n");
@@ -296,14 +280,11 @@ mod test {
     }
 
     fn doubling_test_helper(P: edwards::EdwardsPoint) {
-        //let R1: edwards::EdwardsPoint = serial_double(P.into()).into();
         let R2: edwards::EdwardsPoint = ExtendedPoint::from(P).double().into();
         println!("Testing point doubling:");
         println!("P = {:?}", P);
-        //println!("(serial) R1 = {:?}", R1);
         println!("(vector) R2 = {:?}", R2);
         println!("P + P = {:?}", &P + &P);
-        //assert_eq!(R1.compress(), (&P + &P).compress());
         assert_eq!(R2.compress(), (&P + &P).compress());
         println!("OK!\n");
     }
