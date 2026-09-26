@@ -187,7 +187,13 @@ fn wide_limb(input: &[u8; 64], i: usize) -> i64 {
         return input[63] as i64;
     }
     let bit = WIDE_BITS as usize * i;
-    let word = u32::from_le_bytes(input[bit / 8..bit / 8 + 4].try_into().unwrap());
+    let byte = bit / 8;
+    let word = u32::from_le_bytes([
+        input[byte],
+        input[byte + 1],
+        input[byte + 2],
+        input[byte + 3],
+    ]);
     ((word >> (bit % 8)) as i64) & WIDE_MASK
 }
 
@@ -302,7 +308,6 @@ impl Scalar {
 
     /// Construct a `Scalar` from bytes that are known to be canonical.
     #[inline]
-    #[cfg(curve25519_backend = "simd")]
     pub const fn from_canonical_bytes_unchecked(bytes: [u8; 32]) -> Scalar {
         Scalar { bytes }
     }
@@ -1007,6 +1012,7 @@ impl Scalar {
 
     /// Returns a size hint indicating how many entries of the return
     /// value of `to_radix_2w` are nonzero.
+    #[cfg(test)]
     pub fn to_radix_2w_size_hint(w: usize) -> usize {
         debug_assert!(w >= 4);
         debug_assert!(w <= 8);
@@ -1015,7 +1021,7 @@ impl Scalar {
             4..=7 => 256_usize.div_ceil(w),
             // See comment in to_radix_2w on handling the terminal carry.
             8 => 256_usize.div_ceil(w) + 1_usize,
-            _ => panic!("invalid radix parameter"),
+            0..=3 | 9.. => panic!("invalid radix parameter"),
         };
 
         debug_assert!(digits_count <= 64);
@@ -1096,7 +1102,7 @@ impl Scalar {
         // and accumulate the final carry onto another digit.
         match w {
             8 => digits[digits_count] += carry as i8,
-            _ => digits[digits_count - 1] += (carry << w) as i8,
+            0..=7 | 9.. => digits[digits_count - 1] += (carry << w) as i8,
         }
 
         digits
@@ -1217,23 +1223,12 @@ impl UnpackedScalar {
     }
 }
 
-/// Read one or more u64s stored as little endian bytes.
-///
-/// ## Panics
-/// Panics if `src.len() != 8 * dst.len()`.
-fn read_le_u64_into(src: &[u8], dst: &mut [u64]) {
-    assert!(
-        src.len() == 8 * dst.len(),
-        "src.len() = {}, dst.len() = {}",
-        src.len(),
-        dst.len()
-    );
-    for (bytes, val) in src.chunks(8).zip(dst.iter_mut()) {
-        *val = u64::from_le_bytes(
-            bytes
-                .try_into()
-                .expect("Incorrect src length, should be 8 * dst.len()"),
-        );
+/// Read little-endian u64 words from bytes, eight bytes per word
+fn read_le_u64_into(source: &[u8], destination: &mut [u64]) {
+    debug_assert_eq!(source.len(), 8 * destination.len());
+    let (words, _) = source.as_chunks::<8>();
+    for (bytes, word) in words.iter().zip(destination.iter_mut()) {
+        *word = u64::from_le_bytes(*bytes);
     }
 }
 
@@ -1882,14 +1877,6 @@ pub mod test {
         let x = 0x2323_2323_2323_2323_2323_2323_2323_2323u128;
         let sx = Scalar::from(x);
         assert_eq!(sx + s1, Scalar::from(x + 1));
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_read_le_u64_into_should_panic_on_bad_input() {
-        let mut dst = [0_u64; 1];
-        // One byte short
-        read_le_u64_into(&[0xFE, 0xEF, 0x10, 0x01, 0x1F, 0xF1, 0x0F], &mut dst);
     }
 
     #[test]

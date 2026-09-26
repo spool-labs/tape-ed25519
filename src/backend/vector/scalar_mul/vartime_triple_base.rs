@@ -318,7 +318,7 @@ mod test {
     fn scalar_from_low_128(low: [u8; 16]) -> Scalar {
         let mut bytes = [0u8; 32];
         bytes[..16].copy_from_slice(&low);
-        Scalar::from_canonical_bytes(bytes).unwrap()
+        Scalar::from_canonical_bytes(bytes).expect("a 128-bit scalar is canonical")
     }
 
     #[test]
