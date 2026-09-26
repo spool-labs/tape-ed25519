@@ -32,7 +32,7 @@ pub struct GroupDigits {
 /// Signed radix-16 digits of a scalar below 2^129, truncated to the HEEA window
 pub fn signed_digits(scalar: &Scalar) -> [i8; HEEA_DIGITS] {
     let full = scalar.as_radix_16();
-    debug_assert!(full[HEEA_DIGITS..].iter().all(|&d| d == 0));
+    debug_assert!(full[HEEA_DIGITS..].iter().all(|&digit| digit == 0));
     let mut out = [0i8; HEEA_DIGITS];
     out.copy_from_slice(&full[..HEEA_DIGITS]);
     out
@@ -40,8 +40,8 @@ pub fn signed_digits(scalar: &Scalar) -> [i8; HEEA_DIGITS] {
 
 /// Negate a schedule digit by digit, which keeps every digit in -8..=8
 pub fn negate(digits: &mut [i8; HEEA_DIGITS]) {
-    for d in digits.iter_mut() {
-        *d = -*d;
+    for digit in digits.iter_mut() {
+        *digit = -*digit;
     }
 }
 
@@ -56,7 +56,7 @@ pub fn joint_digits(bytes: &[u8; 32]) -> [u8; JOINT_DIGITS] {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     fn xorshift(state: &mut u64) -> u64 {
@@ -72,22 +72,22 @@ mod test {
         let mut state = 0x1234_5678_9abc_def1u64;
         for _ in 0..20_000u32 {
             let mut bytes = [0u8; 32];
-            for chunk in bytes.chunks_mut(8) {
-                chunk.copy_from_slice(&xorshift(&mut state).to_le_bytes());
+            for word in bytes.chunks_mut(8) {
+                word.copy_from_slice(&xorshift(&mut state).to_le_bytes());
             }
             bytes[31] &= 0x1f;
             let digits = joint_digits(&bytes);
-            let mut lo: u128 = 0;
-            let mut hi: u128 = 0;
-            for &d in digits.iter().rev() {
-                lo = lo << 4 | (d & 15) as u128;
-                hi = hi << 4 | (d >> 4) as u128;
+            let mut low: u128 = 0;
+            let mut high: u128 = 0;
+            for &digit in digits.iter().rev() {
+                low = low << WINDOW | (digit & 15) as u128;
+                high = high << WINDOW | (digit >> WINDOW) as u128;
             }
             let mut half = [0u8; 16];
             half.copy_from_slice(&bytes[..16]);
-            assert_eq!(lo, u128::from_le_bytes(half));
+            assert_eq!(low, u128::from_le_bytes(half));
             half.copy_from_slice(&bytes[16..]);
-            assert_eq!(hi, u128::from_le_bytes(half));
+            assert_eq!(high, u128::from_le_bytes(half));
         }
     }
 }

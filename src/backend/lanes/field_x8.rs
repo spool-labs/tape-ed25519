@@ -35,14 +35,14 @@ impl FieldElementX8 {
     pub const ONE: FieldElementX8 = FieldElementX8::splat(FieldElement51::ONE);
 
     /// Broadcast one field element into all lanes
-    pub const fn splat(fe: FieldElement51) -> FieldElementX8 {
+    pub const fn splat(element: FieldElement51) -> FieldElementX8 {
         FieldElementX8 {
             limbs: [
-                [fe.0[0]; LANES],
-                [fe.0[1]; LANES],
-                [fe.0[2]; LANES],
-                [fe.0[3]; LANES],
-                [fe.0[4]; LANES],
+                [element.0[0]; LANES],
+                [element.0[1]; LANES],
+                [element.0[2]; LANES],
+                [element.0[3]; LANES],
+                [element.0[4]; LANES],
             ],
         }
     }
@@ -50,34 +50,34 @@ impl FieldElementX8 {
     /// Gather eight independent elements into lane order
     pub fn from_lanes(lanes: &[FieldElement51; LANES]) -> FieldElementX8 {
         let mut out = FieldElementX8::ZERO;
-        for (l, fe) in lanes.iter().enumerate() {
-            out.set_lane(l, fe);
+        for (lane, element) in lanes.iter().enumerate() {
+            out.set_lane(lane, element);
         }
         out
     }
 
-    /// Extract lane `l` as a serial field element
-    pub fn lane(&self, l: usize) -> FieldElement51 {
+    /// Extract one lane as a serial field element
+    pub fn lane(&self, lane: usize) -> FieldElement51 {
         FieldElement51::from_limbs([
-            self.limbs[0][l],
-            self.limbs[1][l],
-            self.limbs[2][l],
-            self.limbs[3][l],
-            self.limbs[4][l],
+            self.limbs[0][lane],
+            self.limbs[1][lane],
+            self.limbs[2][lane],
+            self.limbs[3][lane],
+            self.limbs[4][lane],
         ])
     }
 
-    /// Overwrite lane `l`
-    pub fn set_lane(&mut self, l: usize, fe: &FieldElement51) {
+    /// Overwrite one lane
+    pub fn set_lane(&mut self, lane: usize, element: &FieldElement51) {
         for i in 0..5 {
-            self.limbs[i][l] = fe.0[i];
+            self.limbs[i][lane] = element.0[i];
         }
     }
 
     /// Scatter back to eight serial elements
     #[cfg(test)]
     pub fn to_lanes(self) -> [FieldElement51; LANES] {
-        core::array::from_fn(|l| self.lane(l))
+        core::array::from_fn(|lane| self.lane(lane))
     }
 
     /// Apply a binary serial operation lane by lane
@@ -85,21 +85,21 @@ impl FieldElementX8 {
     fn zip_lanes(
         &self,
         rhs: &FieldElementX8,
-        op: impl Fn(&FieldElement51, &FieldElement51) -> FieldElement51,
+        operation: impl Fn(&FieldElement51, &FieldElement51) -> FieldElement51,
     ) -> FieldElementX8 {
         let mut out = FieldElementX8::ZERO;
-        for l in 0..LANES {
-            out.set_lane(l, &op(&self.lane(l), &rhs.lane(l)));
+        for lane in 0..LANES {
+            out.set_lane(lane, &operation(&self.lane(lane), &rhs.lane(lane)));
         }
         out
     }
 
     /// Apply a unary serial operation lane by lane
     #[inline]
-    fn map_lanes(&self, op: impl Fn(&FieldElement51) -> FieldElement51) -> FieldElementX8 {
+    fn map_lanes(&self, operation: impl Fn(&FieldElement51) -> FieldElement51) -> FieldElementX8 {
         let mut out = FieldElementX8::ZERO;
-        for l in 0..LANES {
-            out.set_lane(l, &op(&self.lane(l)));
+        for lane in 0..LANES {
+            out.set_lane(lane, &operation(&self.lane(lane)));
         }
         out
     }
@@ -107,6 +107,7 @@ impl FieldElementX8 {
     pub fn add(&self, rhs: &FieldElementX8) -> FieldElementX8 {
         #[cfg(curve25519_backend = "simd")]
         if use_ifma() {
+            // SAFETY: use_ifma checked the CPU for every feature the kernel needs
             return unsafe { ifma_x8::add_x8(self, rhs) };
         }
         self.zip_lanes(rhs, |a, b| a + b)
@@ -115,6 +116,7 @@ impl FieldElementX8 {
     pub fn sub(&self, rhs: &FieldElementX8) -> FieldElementX8 {
         #[cfg(curve25519_backend = "simd")]
         if use_ifma() {
+            // SAFETY: use_ifma checked the CPU for every feature the kernel needs
             return unsafe { ifma_x8::sub_x8(self, rhs) };
         }
         self.zip_lanes(rhs, |a, b| a - b)
@@ -123,6 +125,7 @@ impl FieldElementX8 {
     pub fn mul(&self, rhs: &FieldElementX8) -> FieldElementX8 {
         #[cfg(curve25519_backend = "simd")]
         if use_ifma() {
+            // SAFETY: use_ifma checked the CPU for every feature the kernel needs
             return unsafe { ifma_x8::mul_x8(self, rhs) };
         }
         self.zip_lanes(rhs, |a, b| a * b)
@@ -131,6 +134,7 @@ impl FieldElementX8 {
     pub fn neg(&self) -> FieldElementX8 {
         #[cfg(curve25519_backend = "simd")]
         if use_ifma() {
+            // SAFETY: use_ifma checked the CPU for every feature the kernel needs
             return unsafe { ifma_x8::neg_x8(self) };
         }
         self.map_lanes(|a| -a)
@@ -139,6 +143,7 @@ impl FieldElementX8 {
     pub fn square(&self) -> FieldElementX8 {
         #[cfg(curve25519_backend = "simd")]
         if use_ifma() {
+            // SAFETY: use_ifma checked the CPU for every feature the kernel needs
             return unsafe { ifma_x8::square_x8(self) };
         }
         self.map_lanes(|a| a.square())
@@ -148,6 +153,7 @@ impl FieldElementX8 {
     pub fn square2(&self) -> FieldElementX8 {
         #[cfg(curve25519_backend = "simd")]
         if use_ifma() {
+            // SAFETY: use_ifma checked the CPU for every feature the kernel needs
             return unsafe { ifma_x8::square2_x8(self) };
         }
         self.map_lanes(|a| a.square2())
@@ -158,6 +164,7 @@ impl FieldElementX8 {
         debug_assert!(k > 0);
         #[cfg(curve25519_backend = "simd")]
         if use_ifma() {
+            // SAFETY: use_ifma checked the CPU for every feature the kernel needs
             return unsafe { ifma_x8::pow2k_x8(self, k) };
         }
         self.map_lanes(|a| a.pow2k(k))
@@ -198,35 +205,35 @@ impl FieldElementX8 {
 
     /// Canonical little-endian encodings, one per lane
     pub fn to_bytes_lanes(self) -> [[u8; 32]; LANES] {
-        core::array::from_fn(|l| self.lane(l).to_bytes())
+        core::array::from_fn(|lane| self.lane(lane).to_bytes())
     }
 
     /// Flag the lanes that are zero mod p
     pub fn is_zero_lanes(&self) -> LaneMask {
         let bytes = self.to_bytes_lanes();
-        core::array::from_fn(|l| bytes[l] == [0u8; 32])
+        core::array::from_fn(|lane| bytes[lane] == [0u8; 32])
     }
 
     /// Flag the lanes whose canonical encoding is odd
     pub fn is_negative_lanes(&self) -> LaneMask {
         let bytes = self.to_bytes_lanes();
-        core::array::from_fn(|l| bytes[l][0] & 1 == 1)
+        core::array::from_fn(|lane| bytes[lane][0] & 1 == 1)
     }
 
-    /// Take `other` in the lanes the mask sets and `self` in the rest
+    /// Take `other` where the mask is true and `self` elsewhere
     pub fn select_lanes(&self, other: &FieldElementX8, take_other: &LaneMask) -> Self {
         let mut out = *self;
-        for (l, take) in take_other.iter().enumerate() {
-            if *take {
+        for (lane, should_take) in take_other.iter().enumerate() {
+            if *should_take {
                 for i in 0..5 {
-                    out.limbs[i][l] = other.limbs[i][l];
+                    out.limbs[i][lane] = other.limbs[i][lane];
                 }
             }
         }
         out
     }
 
-    /// Negate the lanes the mask sets
+    /// Negate every lane whose mask flag is true
     pub fn negate_lanes(&self, negate: &LaneMask) -> Self {
         self.select_lanes(&self.neg(), negate)
     }
@@ -251,37 +258,41 @@ pub fn sqrt_ratio_i_x8(u: &FieldElementX8, v: &FieldElementX8) -> (LaneMask, Fie
     let u_neg_bytes = u_neg.to_bytes_lanes();
     let u_neg_i_bytes = u_neg_i.to_bytes_lanes();
 
-    let correct_sign: LaneMask = core::array::from_fn(|l| check_bytes[l] == u_bytes[l]);
-    let flipped_sign: LaneMask = core::array::from_fn(|l| check_bytes[l] == u_neg_bytes[l]);
-    let flipped_sign_i: LaneMask = core::array::from_fn(|l| check_bytes[l] == u_neg_i_bytes[l]);
+    let correct_sign: LaneMask = core::array::from_fn(|lane| check_bytes[lane] == u_bytes[lane]);
+    let flipped_sign: LaneMask =
+        core::array::from_fn(|lane| check_bytes[lane] == u_neg_bytes[lane]);
+    let flipped_sign_i: LaneMask =
+        core::array::from_fn(|lane| check_bytes[lane] == u_neg_i_bytes[lane]);
 
     let r_prime = r.mul(&sqrt_m1);
-    let take_prime: LaneMask = core::array::from_fn(|l| flipped_sign[l] || flipped_sign_i[l]);
+    let take_prime: LaneMask =
+        core::array::from_fn(|lane| flipped_sign[lane] || flipped_sign_i[lane]);
     let mut r = r.select_lanes(&r_prime, &take_prime);
 
     let r_is_negative = r.is_negative_lanes();
     r = r.negate_lanes(&r_is_negative);
 
-    let was_square: LaneMask = core::array::from_fn(|l| correct_sign[l] || flipped_sign[l]);
+    let was_square: LaneMask =
+        core::array::from_fn(|lane| correct_sign[lane] || flipped_sign[lane]);
 
     (was_square, r)
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::field::FieldElement;
 
     // deterministic canonical pseudorandom elements
-    fn test_elements(seed: u64) -> [FieldElement51; LANES] {
+    fn random_elements(seed: u64) -> [FieldElement51; LANES] {
         let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
         core::array::from_fn(|_| {
             let mut bytes = [0u8; 32];
-            for chunk in bytes.chunks_mut(8) {
+            for word in bytes.chunks_mut(8) {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                chunk.copy_from_slice(&state.to_le_bytes());
+                word.copy_from_slice(&state.to_le_bytes());
             }
             bytes[31] &= 0x7f;
             FieldElement51::from_bytes(&bytes)
@@ -290,32 +301,41 @@ mod test {
 
     // lane-wise add, sub, mul, square and pow_p58 match the serial element
     #[test]
-    fn lane_ops_match_serial() {
-        let a_lanes = test_elements(1);
-        let b_lanes = test_elements(2);
+    fn lane_arithmetic() {
+        let a_lanes = random_elements(1);
+        let b_lanes = random_elements(2);
         let a = FieldElementX8::from_lanes(&a_lanes);
         let b = FieldElementX8::from_lanes(&b_lanes);
 
         let sum = a.add(&b).to_lanes();
-        let diff = a.sub(&b).to_lanes();
-        let prod = a.mul(&b).to_lanes();
-        let sq = a.square().to_lanes();
-        let p58 = a.pow_p58().to_lanes();
+        let difference = a.sub(&b).to_lanes();
+        let product = a.mul(&b).to_lanes();
+        let squared = a.square().to_lanes();
+        let power = a.pow_p58().to_lanes();
 
-        for l in 0..LANES {
-            assert_eq!(sum[l].to_bytes(), (&a_lanes[l] + &b_lanes[l]).to_bytes());
-            assert_eq!(diff[l].to_bytes(), (&a_lanes[l] - &b_lanes[l]).to_bytes());
-            assert_eq!(prod[l].to_bytes(), (&a_lanes[l] * &b_lanes[l]).to_bytes());
-            assert_eq!(sq[l].to_bytes(), a_lanes[l].square().to_bytes());
-            assert_eq!(p58[l].to_bytes(), a_lanes[l].pow_p58().to_bytes());
+        for lane in 0..LANES {
+            assert_eq!(
+                sum[lane].to_bytes(),
+                (&a_lanes[lane] + &b_lanes[lane]).to_bytes()
+            );
+            assert_eq!(
+                difference[lane].to_bytes(),
+                (&a_lanes[lane] - &b_lanes[lane]).to_bytes()
+            );
+            assert_eq!(
+                product[lane].to_bytes(),
+                (&a_lanes[lane] * &b_lanes[lane]).to_bytes()
+            );
+            assert_eq!(squared[lane].to_bytes(), a_lanes[lane].square().to_bytes());
+            assert_eq!(power[lane].to_bytes(), a_lanes[lane].pow_p58().to_bytes());
         }
     }
 
     // lane-wise sqrt_ratio_i matches the serial one, zero inputs included
     #[test]
-    fn sqrt_ratio_matches_serial() {
-        let u_lanes = test_elements(3);
-        let v_lanes = test_elements(4);
+    fn sqrt_ratio() {
+        let u_lanes = random_elements(3);
+        let v_lanes = random_elements(4);
 
         // lanes 0 and 1 cover u = 0 and v = 0
         let mut u_lanes = u_lanes;
@@ -331,10 +351,19 @@ mod test {
         );
         let roots = root.to_lanes();
 
-        for l in 0..LANES {
-            let (serial_ok, serial_root) = FieldElement::sqrt_ratio_i(&u_lanes[l], &v_lanes[l]);
-            assert_eq!(mask[l], bool::from(serial_ok), "square mask lane {l}");
-            assert_eq!(roots[l].to_bytes(), serial_root.to_bytes(), "root lane {l}");
+        for lane in 0..LANES {
+            let (serial_is_square, serial_root) =
+                FieldElement::sqrt_ratio_i(&u_lanes[lane], &v_lanes[lane]);
+            assert_eq!(
+                mask[lane],
+                bool::from(serial_is_square),
+                "square mask lane {lane}"
+            );
+            assert_eq!(
+                roots[lane].to_bytes(),
+                serial_root.to_bytes(),
+                "root lane {lane}"
+            );
         }
     }
 }

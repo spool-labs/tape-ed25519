@@ -1,7 +1,5 @@
 //! Eight signatures at a time, one per SIMD lane, each with its own verdict
 
-#![allow(non_snake_case)]
-
 use alloc::vec::Vec;
 
 use crate::backend::lanes::digits::GroupDigits;
@@ -22,11 +20,11 @@ use crate::backend::lanes::ifma_x8;
 #[cfg(curve25519_backend = "simd")]
 use crate::backend::lanes::sha512_x8::{challenge_digests_x16, challenge_digests_x8};
 
-/// One batch item: the encoded key, the signature, and the message it covers
+/// One batch item: the encoded key, the signature and the signed message
 pub type Item<'message> = ([u8; VERIFYING_KEY_LENGTH], Signature, &'message [u8]);
 
-/// Batch length up to which the group ordering needs no allocation
-const ORDER_STACK_CAP: usize = 128;
+/// The group ordering needs no allocation up to this batch length
+const ORDER_STACK_CAPACITY: usize = 128;
 
 /// Bytes in a SHA-512 block
 const BLOCK_LENGTH: usize = 128;
@@ -46,6 +44,9 @@ const COFACTOR_DOUBLINGS: u32 = 3;
 /// Doublings between two radix-16 digit positions
 const DIGIT_DOUBLINGS: usize = 4;
 
+/// Groups in one sixteen-wide hash pass
+const GROUPS_PER_PAIR: usize = 2;
+
 /// Whether this host runs the lane path, which only AVX-512 IFMA makes faster
 pub fn is_lane_engine_available() -> bool {
     #[cfg(curve25519_backend = "simd")]
@@ -63,9 +64,9 @@ pub fn verify_batch(items: &[Item<'_>]) -> Vec<bool> {
     let count = items.len();
     let mut verdicts = alloc::vec![false; count];
 
-    let mut stack = [0u32; ORDER_STACK_CAP];
+    let mut stack = [0u32; ORDER_STACK_CAPACITY];
     let mut heap: Vec<u32>;
-    let order: &mut [u32] = match count <= ORDER_STACK_CAP {
+    let order: &mut [u32] = match count <= ORDER_STACK_CAPACITY {
         true => {
             for (index, slot) in stack[..count].iter_mut().enumerate() {
                 *slot = index as u32;
@@ -82,17 +83,17 @@ pub fn verify_batch(items: &[Item<'_>]) -> Vec<bool> {
 
     // Pair two groups while sixteen items remain so one hash pass serves both
     let mut done = 0;
-    while done + 2 * LANES <= count {
-        let pair: [[Item<'_>; LANES]; 2] = core::array::from_fn(|group| {
+    while done + GROUPS_PER_PAIR * LANES <= count {
+        let pair: [[Item<'_>; LANES]; GROUPS_PER_PAIR] = core::array::from_fn(|group| {
             core::array::from_fn(|lane| items[order[done + group * LANES + lane] as usize])
         });
         let pair_verdicts = verify_group_pair(&pair);
-        for group in 0..2 {
+        for group in 0..GROUPS_PER_PAIR {
             for lane in 0..LANES {
                 verdicts[order[done + group * LANES + lane] as usize] = pair_verdicts[group][lane];
             }
         }
-        done += 2 * LANES;
+        done += GROUPS_PER_PAIR * LANES;
     }
     while done + LANES <= count {
         let group: [Item<'_>; LANES] =
@@ -123,9 +124,9 @@ pub fn verify_batch(items: &[Item<'_>]) -> Vec<bool> {
     verdicts
 }
 
-/// Count the SHA-512 blocks one message costs with prefix and padding
-fn hash_blocks(message_len: usize) -> u32 {
-    (PREFIX_LENGTH + message_len + PADDING_LENGTH).div_ceil(BLOCK_LENGTH) as u32
+/// Count the SHA-512 blocks of one message with its prefix and padding
+fn hash_blocks(message_length: usize) -> u32 {
+    (PREFIX_LENGTH + message_length + PADDING_LENGTH).div_ceil(BLOCK_LENGTH) as u32
 }
 
 /// Verify one full group of eight signatures in lockstep
@@ -135,25 +136,25 @@ fn verify_group(group: &[Item<'_>; LANES]) -> LaneMask {
     let s_bytes: [[u8; HALF_LENGTH]; LANES] = core::array::from_fn(|lane| *group[lane].1.s_bytes());
     let messages: [&[u8]; LANES] = core::array::from_fn(|lane| group[lane].2);
 
-    let k = challenge_scalars(&a_bytes, &r_bytes, &messages);
-    let (digits, alive) = prepare_group(&k, &s_bytes);
+    let challenges = challenge_scalars(&a_bytes, &r_bytes, &messages);
+    let (digits, alive) = prepare_group(&challenges, &s_bytes);
     run_curve_stage(&a_bytes, &r_bytes, &digits, &alive)
 }
 
 /// Verify two full groups with one sixteen-wide challenge hash pass
-fn verify_group_pair(pair: &[[Item<'_>; LANES]; 2]) -> [LaneMask; 2] {
-    let a_bytes: [[[u8; VERIFYING_KEY_LENGTH]; LANES]; 2] =
+fn verify_group_pair(pair: &[[Item<'_>; LANES]; GROUPS_PER_PAIR]) -> [LaneMask; GROUPS_PER_PAIR] {
+    let a_bytes: [[[u8; VERIFYING_KEY_LENGTH]; LANES]; GROUPS_PER_PAIR] =
         core::array::from_fn(|group| core::array::from_fn(|lane| pair[group][lane].0));
-    let r_bytes: [[[u8; HALF_LENGTH]; LANES]; 2] =
+    let r_bytes: [[[u8; HALF_LENGTH]; LANES]; GROUPS_PER_PAIR] =
         core::array::from_fn(|group| core::array::from_fn(|lane| *pair[group][lane].1.r_bytes()));
-    let s_bytes: [[[u8; HALF_LENGTH]; LANES]; 2] =
+    let s_bytes: [[[u8; HALF_LENGTH]; LANES]; GROUPS_PER_PAIR] =
         core::array::from_fn(|group| core::array::from_fn(|lane| *pair[group][lane].1.s_bytes()));
-    let messages: [[&[u8]; LANES]; 2] =
+    let messages: [[&[u8]; LANES]; GROUPS_PER_PAIR] =
         core::array::from_fn(|group| core::array::from_fn(|lane| pair[group][lane].2));
 
-    let k = challenge_scalars_pair(&a_bytes, &r_bytes, &messages);
+    let challenges = challenge_scalars_pair(&a_bytes, &r_bytes, &messages);
     core::array::from_fn(|group| {
-        let (digits, alive) = prepare_group(&k[group], &s_bytes[group]);
+        let (digits, alive) = prepare_group(&challenges[group], &s_bytes[group]);
         run_curve_stage(&a_bytes[group], &r_bytes[group], &digits, &alive)
     })
 }
@@ -176,10 +177,10 @@ fn challenge_scalars(
 
 /// Compute two groups' challenge scalars, sixteen-wide where the vector unit allows
 fn challenge_scalars_pair(
-    a_bytes: &[[[u8; VERIFYING_KEY_LENGTH]; LANES]; 2],
-    r_bytes: &[[[u8; HALF_LENGTH]; LANES]; 2],
-    messages: &[[&[u8]; LANES]; 2],
-) -> [[Scalar; LANES]; 2] {
+    a_bytes: &[[[u8; VERIFYING_KEY_LENGTH]; LANES]; GROUPS_PER_PAIR],
+    r_bytes: &[[[u8; HALF_LENGTH]; LANES]; GROUPS_PER_PAIR],
+    messages: &[[&[u8]; LANES]; GROUPS_PER_PAIR],
+) -> [[Scalar; LANES]; GROUPS_PER_PAIR] {
     #[cfg(curve25519_backend = "simd")]
     if ifma_x8::available() {
         // SAFETY: the cpuid check above guards the kernel
@@ -202,7 +203,7 @@ fn challenge_scalars_pair(
 
 /// Range-check `s` per lane, decompose the challenge, and lay out the digit schedules
 fn prepare_group(
-    k: &[Scalar; LANES],
+    challenges: &[Scalar; LANES],
     s_bytes: &[[u8; HALF_LENGTH]; LANES],
 ) -> (GroupDigits, LaneMask) {
     // A non-canonical s invalidates only its own lane
@@ -223,7 +224,7 @@ fn prepare_group(
     let mut r = [[0i8; HEEA_DIGITS]; LANES];
 
     for lane in 0..LANES {
-        let (rho, tau, is_k_flipped) = k[lane].heea_decompose();
+        let (rho, tau, is_k_flipped) = challenges[lane].heea_decompose();
         let tau_s = tau * s[lane];
         for (position, &digit) in joint_digits(tau_s.as_bytes()).iter().enumerate() {
             b[position][lane] = digit as u64;
@@ -277,14 +278,14 @@ fn verify_curve_portable(
 ) -> LaneMask {
     let mut alive = *alive_in;
 
-    let (A, a_valid) = decompress_x8(a_encodings);
-    let (R, r_valid) = decompress_x8(r_encodings);
+    let (a_point, a_valid) = decompress_x8(a_encodings);
+    let (r_point, r_valid) = decompress_x8(r_encodings);
     for lane in 0..LANES {
         alive[lane] &= a_valid[lane] & r_valid[lane];
     }
 
-    let table_A = LookupTableX8::from_extended(&A);
-    let table_R = LookupTableX8::from_extended(&R);
+    let a_table = LookupTableX8::from_extended(&a_point);
+    let r_table = LookupTableX8::from_extended(&r_point);
 
     let mut accumulator: Option<ProjectivePointX8> = None;
     let mut last: Option<CompletedPointX8> = None;
@@ -304,10 +305,10 @@ fn verify_curve_portable(
             .add(&JOINT_TABLE_B.select(&digits.b[position]))
             .as_extended();
         point = point
-            .add(&table_A.select(&core::array::from_fn(|lane| digits.a[lane][position])))
+            .add(&a_table.select(&core::array::from_fn(|lane| digits.a[lane][position])))
             .as_extended();
         let completed =
-            point.add(&table_R.select(&core::array::from_fn(|lane| digits.r[lane][position])));
+            point.add(&r_table.select(&core::array::from_fn(|lane| digits.r[lane][position])));
         accumulator = Some(completed.as_projective());
         last = Some(completed);
     }

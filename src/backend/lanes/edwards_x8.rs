@@ -10,6 +10,9 @@ use crate::constants::{EDWARDS_D, EDWARDS_D2};
 #[cfg(test)]
 use crate::edwards::EdwardsPoint;
 
+/// Each lookup table holds the multiples one through eight
+const TABLE_SIZE: usize = 8;
+
 /// Eight points in extended coordinates `(X : Y : Z : T)`, one per lane
 #[derive(Clone, Copy, Debug)]
 pub struct ExtendedPointX8 {
@@ -57,21 +60,21 @@ impl ExtendedPointX8 {
     #[cfg(test)]
     pub fn from_lanes(points: &[EdwardsPoint; LANES]) -> ExtendedPointX8 {
         ExtendedPointX8 {
-            X: FieldElementX8::from_lanes(&core::array::from_fn(|l| points[l].X)),
-            Y: FieldElementX8::from_lanes(&core::array::from_fn(|l| points[l].Y)),
-            Z: FieldElementX8::from_lanes(&core::array::from_fn(|l| points[l].Z)),
-            T: FieldElementX8::from_lanes(&core::array::from_fn(|l| points[l].T)),
+            X: FieldElementX8::from_lanes(&core::array::from_fn(|lane| points[lane].X)),
+            Y: FieldElementX8::from_lanes(&core::array::from_fn(|lane| points[lane].Y)),
+            Z: FieldElementX8::from_lanes(&core::array::from_fn(|lane| points[lane].Z)),
+            T: FieldElementX8::from_lanes(&core::array::from_fn(|lane| points[lane].T)),
         }
     }
 
-    /// Extract lane `l` as a serial point
+    /// Extract one lane as a serial point
     #[cfg(test)]
-    pub fn lane(&self, l: usize) -> EdwardsPoint {
+    pub fn lane(&self, lane: usize) -> EdwardsPoint {
         EdwardsPoint {
-            X: self.X.lane(l),
-            Y: self.Y.lane(l),
-            Z: self.Z.lane(l),
-            T: self.T.lane(l),
+            X: self.X.lane(lane),
+            Y: self.Y.lane(lane),
+            Z: self.Z.lane(lane),
+            T: self.T.lane(lane),
         }
     }
 
@@ -126,7 +129,7 @@ impl ExtendedPointX8 {
     pub fn is_identity_lanes(&self) -> LaneMask {
         let x_zero = self.X.is_zero_lanes();
         let y_eq_z = self.Y.sub(&self.Z).is_zero_lanes();
-        core::array::from_fn(|l| x_zero[l] && y_eq_z[l])
+        core::array::from_fn(|lane| x_zero[lane] && y_eq_z[lane])
     }
 }
 
@@ -177,13 +180,13 @@ impl ProjectiveNielsX8 {
         T2d: FieldElementX8::ZERO,
     };
 
-    /// Copy lane `l` of `src` into lane `l` of `self`
-    fn copy_lane(&mut self, l: usize, src: &ProjectiveNielsX8) {
+    /// Copy one lane of `source` into the same lane of `self`
+    fn copy_lane(&mut self, lane: usize, source: &ProjectiveNielsX8) {
         for i in 0..5 {
-            self.Y_plus_X.limbs[i][l] = src.Y_plus_X.limbs[i][l];
-            self.Y_minus_X.limbs[i][l] = src.Y_minus_X.limbs[i][l];
-            self.Z.limbs[i][l] = src.Z.limbs[i][l];
-            self.T2d.limbs[i][l] = src.T2d.limbs[i][l];
+            self.Y_plus_X.limbs[i][lane] = source.Y_plus_X.limbs[i][lane];
+            self.Y_minus_X.limbs[i][lane] = source.Y_minus_X.limbs[i][lane];
+            self.Z.limbs[i][lane] = source.Z.limbs[i][lane];
+            self.T2d.limbs[i][lane] = source.T2d.limbs[i][lane];
         }
     }
 
@@ -191,12 +194,12 @@ impl ProjectiveNielsX8 {
     fn negate_lanes(&self, negate: &LaneMask) -> ProjectiveNielsX8 {
         let neg_T2d = self.T2d.neg();
         let mut out = *self;
-        for (l, neg) in negate.iter().enumerate() {
-            if *neg {
+        for (lane, should_negate) in negate.iter().enumerate() {
+            if *should_negate {
                 for i in 0..5 {
-                    out.Y_plus_X.limbs[i][l] = self.Y_minus_X.limbs[i][l];
-                    out.Y_minus_X.limbs[i][l] = self.Y_plus_X.limbs[i][l];
-                    out.T2d.limbs[i][l] = neg_T2d.limbs[i][l];
+                    out.Y_plus_X.limbs[i][lane] = self.Y_minus_X.limbs[i][lane];
+                    out.Y_minus_X.limbs[i][lane] = self.Y_plus_X.limbs[i][lane];
+                    out.T2d.limbs[i][lane] = neg_T2d.limbs[i][lane];
                 }
             }
         }
@@ -205,14 +208,14 @@ impl ProjectiveNielsX8 {
 }
 
 /// The multiples `[P, 2P, ..., 8P]` of eight points, one table per lane
-pub struct LookupTableX8(pub [ProjectiveNielsX8; 8]);
+pub struct LookupTableX8(pub [ProjectiveNielsX8; TABLE_SIZE]);
 
 impl LookupTableX8 {
     /// Build `[P, 2P, ..., 8P]` for all lanes at once
     pub fn from_extended(P: &ExtendedPointX8) -> LookupTableX8 {
-        let mut points = [P.to_projective_niels(); 8];
-        for j in 0..7 {
-            points[j + 1] = P.add(&points[j]).as_extended().to_projective_niels();
+        let mut points = [P.to_projective_niels(); TABLE_SIZE];
+        for index in 0..TABLE_SIZE - 1 {
+            points[index + 1] = P.add(&points[index]).as_extended().to_projective_niels();
         }
         LookupTableX8(points)
     }
@@ -221,13 +224,13 @@ impl LookupTableX8 {
     pub fn select(&self, digits: &[i8; LANES]) -> ProjectiveNielsX8 {
         let mut out = ProjectiveNielsX8::IDENTITY;
         let mut negate: LaneMask = [false; LANES];
-        for l in 0..LANES {
-            let d = digits[l];
-            if d != 0 {
-                let idx = (d.unsigned_abs() as usize) - 1;
-                debug_assert!(idx < 8);
-                out.copy_lane(l, &self.0[idx]);
-                negate[l] = d < 0;
+        for lane in 0..LANES {
+            let digit = digits[lane];
+            if digit != 0 {
+                let index = (digit.unsigned_abs() as usize) - 1;
+                debug_assert!(index < TABLE_SIZE);
+                out.copy_lane(lane, &self.0[index]);
+                negate[lane] = digit < 0;
             }
         }
         out.negate_lanes(&negate)
@@ -236,8 +239,8 @@ impl LookupTableX8 {
 
 /// Decompress eight encodings under the ZIP-215 rules, with invalid lanes flagged and set to the identity
 pub fn decompress_x8(encodings: &[[u8; 32]; LANES]) -> (ExtendedPointX8, LaneMask) {
-    let Y = FieldElementX8::from_lanes(&core::array::from_fn(|l| {
-        FieldElement51::from_bytes(&encodings[l])
+    let Y = FieldElementX8::from_lanes(&core::array::from_fn(|lane| {
+        FieldElement51::from_bytes(&encodings[lane])
     }));
     let Z = FieldElementX8::ONE;
     let YY = Y.square();
@@ -246,7 +249,7 @@ pub fn decompress_x8(encodings: &[[u8; 32]; LANES]) -> (ExtendedPointX8, LaneMas
     let (is_valid, X) = sqrt_ratio_i_x8(&u, &v);
 
     // The root comes back nonnegative, so the encoded sign bit picks the sign
-    let sign_bits: LaneMask = core::array::from_fn(|l| encodings[l][31] >> 7 == 1);
+    let sign_bits: LaneMask = core::array::from_fn(|lane| encodings[lane][31] >> 7 == 1);
     let X = X.negate_lanes(&sign_bits);
 
     let point = ExtendedPointX8 {
@@ -267,115 +270,117 @@ pub fn decompress_x8(encodings: &[[u8; 32]; LANES]) -> (ExtendedPointX8, LaneMas
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::constants::ED25519_BASEPOINT_POINT;
     use crate::edwards::CompressedEdwardsY;
     use crate::scalar::Scalar;
     use crate::traits::Identity;
 
-    fn test_points(seed: u64) -> [EdwardsPoint; LANES] {
-        core::array::from_fn(|l| {
+    fn random_points(seed: u64) -> [EdwardsPoint; LANES] {
+        core::array::from_fn(|lane| {
             let mut bytes = [0u8; 32];
-            bytes[..8].copy_from_slice(&(seed.wrapping_mul(1 + l as u64)).to_le_bytes());
+            bytes[..8].copy_from_slice(&(seed.wrapping_mul(1 + lane as u64)).to_le_bytes());
             bytes[8] = 1;
             ED25519_BASEPOINT_POINT * Scalar::from_bytes_mod_order(bytes)
         })
     }
 
-    fn assert_lanes_eq(x8: &ExtendedPointX8, expected: &[EdwardsPoint; LANES], what: &str) {
-        for (l, expected) in expected.iter().enumerate() {
+    fn assert_lanes_eq(points: &ExtendedPointX8, expected: &[EdwardsPoint; LANES], what: &str) {
+        for (lane, expected) in expected.iter().enumerate() {
             assert_eq!(
-                x8.lane(l).compress(),
+                points.lane(lane).compress(),
                 expected.compress(),
-                "{what} lane {l}"
+                "{what} lane {lane}"
             );
         }
     }
 
-    // lane-wise add, double and mul_by_pow_2 match the serial point ops
+    // lane-wise add, double and mul_by_pow_2 match the serial point operations
     #[test]
-    fn add_double_match_serial() {
-        let ps = test_points(11);
-        let qs = test_points(23);
-        let P = ExtendedPointX8::from_lanes(&ps);
-        let Q = ExtendedPointX8::from_lanes(&qs);
+    fn point_arithmetic() {
+        let left_points = random_points(11);
+        let right_points = random_points(23);
+        let left = ExtendedPointX8::from_lanes(&left_points);
+        let right = ExtendedPointX8::from_lanes(&right_points);
 
-        let sum = P.add(&Q.to_projective_niels()).as_extended();
-        let expected_sum: [EdwardsPoint; LANES] = core::array::from_fn(|l| ps[l] + qs[l]);
+        let sum = left.add(&right.to_projective_niels()).as_extended();
+        let expected_sum: [EdwardsPoint; LANES] =
+            core::array::from_fn(|lane| left_points[lane] + right_points[lane]);
         assert_lanes_eq(&sum, &expected_sum, "add");
 
-        let doubled = P.as_projective().double().as_extended();
-        let expected_dbl: [EdwardsPoint; LANES] = core::array::from_fn(|l| ps[l].double());
-        assert_lanes_eq(&doubled, &expected_dbl, "double");
+        let doubled = left.as_projective().double().as_extended();
+        let expected_double: [EdwardsPoint; LANES] =
+            core::array::from_fn(|lane| left_points[lane].double());
+        assert_lanes_eq(&doubled, &expected_double, "double");
 
-        let by8 = P.mul_by_pow_2(3);
-        let expected_by8: [EdwardsPoint; LANES] = core::array::from_fn(|l| ps[l].mul_by_pow_2(3));
-        assert_lanes_eq(&by8, &expected_by8, "mul_by_pow_2");
+        let times_eight = left.mul_by_pow_2(3);
+        let expected_times_eight: [EdwardsPoint; LANES] =
+            core::array::from_fn(|lane| left_points[lane].mul_by_pow_2(3));
+        assert_lanes_eq(&times_eight, &expected_times_eight, "mul_by_pow_2");
     }
 
     // a table select yields the signed multiple of each lane's digit
     #[test]
-    fn table_select_matches_serial_multiples() {
-        let ps = test_points(37);
-        let P = ExtendedPointX8::from_lanes(&ps);
-        let table = LookupTableX8::from_extended(&P);
+    fn table_select() {
+        let points = random_points(37);
+        let table = LookupTableX8::from_extended(&ExtendedPointX8::from_lanes(&points));
 
         let digits: [i8; LANES] = [0, 1, -1, 8, -8, 3, -5, 7];
         let selected = ExtendedPointX8::IDENTITY
             .add(&table.select(&digits))
             .as_extended();
 
-        for l in 0..LANES {
-            let expected = if digits[l] == 0 {
+        for lane in 0..LANES {
+            let expected = if digits[lane] == 0 {
                 EdwardsPoint::identity()
             } else {
-                let m = ps[l] * Scalar::from(digits[l].unsigned_abs() as u64);
-                if digits[l] < 0 {
-                    -m
+                let multiple = points[lane] * Scalar::from(digits[lane].unsigned_abs() as u64);
+                if digits[lane] < 0 {
+                    -multiple
                 } else {
-                    m
+                    multiple
                 }
             };
             assert_eq!(
-                selected.lane(l).compress(),
+                selected.lane(lane).compress(),
                 expected.compress(),
-                "digit {} lane {l}",
-                digits[l]
+                "digit {} lane {lane}",
+                digits[lane]
             );
         }
     }
 
     // lane-wise decompression matches the serial one, invalid lanes included
     #[test]
-    fn decompress_matches_serial() {
-        let ps = test_points(53);
+    fn decompress() {
+        let originals = random_points(53);
         let mut encodings: [[u8; 32]; LANES] =
-            core::array::from_fn(|l| ps[l].compress().to_bytes());
+            core::array::from_fn(|lane| originals[lane].compress().to_bytes());
 
         // lane 2 flips the sign bit, lane 4 is off the curve, lane 6 is the identity
         encodings[2][31] ^= 1 << 7;
         encodings[4] = [0x05; 32];
         encodings[6] = CompressedEdwardsY::identity().to_bytes();
 
-        let (points, valid) = decompress_x8(&encodings);
+        let (points, is_valid) = decompress_x8(&encodings);
 
-        for l in 0..LANES {
-            match CompressedEdwardsY(encodings[l]).decompress() {
+        for lane in 0..LANES {
+            match CompressedEdwardsY(encodings[lane]).decompress() {
                 Some(expected) => {
-                    assert!(valid[l], "lane {l} should be valid");
+                    assert!(is_valid[lane], "lane {lane} should be valid");
                     assert_eq!(
-                        points.lane(l).compress(),
+                        points.lane(lane).compress(),
                         expected.compress(),
-                        "decompress lane {l}"
+                        "decompress lane {lane}"
                     );
                 }
-                None => assert!(!valid[l], "lane {l} should be invalid"),
+                None => assert!(!is_valid[lane], "lane {lane} should be invalid"),
             }
         }
 
-        let id = points.is_identity_lanes();
-        assert!(id[6], "identity lane detected");
-        assert!(!id[0], "non-identity lane not flagged");
+        let identity_lanes = points.is_identity_lanes();
+        assert!(identity_lanes[6], "identity lane detected");
+        assert!(!identity_lanes[0], "non-identity lane not flagged");
     }
 }

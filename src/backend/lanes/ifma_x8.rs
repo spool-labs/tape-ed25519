@@ -61,6 +61,7 @@ tf!(
 
 tf!(
     fn load(fe: &FieldElementX8) -> [__m512i; 5] {
+        // SAFETY: each limb row holds eight u64 lanes, exactly one unaligned 512-bit load
         unsafe {
             [
                 _mm512_loadu_si512(fe.limbs[0].as_ptr() as *const _),
@@ -76,6 +77,7 @@ tf!(
 tf!(
     fn store(x: [__m512i; 5]) -> FieldElementX8 {
         let mut out = FieldElementX8::ZERO;
+        // SAFETY: each limb row holds eight u64 lanes, exactly one unaligned 512-bit store
         unsafe {
             for (limbs, v) in out.limbs.iter_mut().zip(x.iter()) {
                 _mm512_storeu_si512(limbs.as_mut_ptr() as *mut _, *v);
@@ -733,8 +735,8 @@ pub mod fused {
                 x = fblend(x_negative, x, fsub(zero, x));
 
                 let mut sign_bits: u8 = 0;
-                for (l, e) in encodings.iter().enumerate() {
-                    sign_bits |= (e[31] >> 7) << l;
+                for (lane, encoding) in encodings.iter().enumerate() {
+                    sign_bits |= (encoding[31] >> 7) << lane;
                 }
                 x = fblend(sign_bits, x, fsub(zero, x));
 
@@ -836,6 +838,7 @@ pub mod fused {
             let mut out = [splat(0); 5];
             let mut i = 0;
             while i < 5 {
+                // SAFETY: each table row holds eight u64 lanes, exactly one unaligned 512-bit load
                 let rows = [
                     _mm512_loadu_si512($table.0[0].$field.limbs[i].as_ptr() as *const _),
                     _mm512_loadu_si512($table.0[1].$field.limbs[i].as_ptr() as *const _),
@@ -865,23 +868,23 @@ pub mod fused {
             let mut m2: u8 = 0;
             let mut zero_mask: u8 = 0;
             let mut sign_mask: u8 = 0;
-            for (l, &d) in digits.iter().enumerate() {
-                if d == 0 {
-                    zero_mask |= 1 << l;
+            for (lane, &digit) in digits.iter().enumerate() {
+                if digit == 0 {
+                    zero_mask |= 1 << lane;
                     continue;
                 }
-                if d < 0 {
-                    sign_mask |= 1 << l;
+                if digit < 0 {
+                    sign_mask |= 1 << lane;
                 }
-                let idx = d.unsigned_abs() - 1;
-                if idx & 1 != 0 {
-                    m0 |= 1 << l;
+                let index = digit.unsigned_abs() - 1;
+                if index & 1 != 0 {
+                    m0 |= 1 << lane;
                 }
-                if idx & 2 != 0 {
-                    m1 |= 1 << l;
+                if index & 2 != 0 {
+                    m1 |= 1 << lane;
                 }
-                if idx & 4 != 0 {
-                    m2 |= 1 << l;
+                if index & 4 != 0 {
+                    m2 |= 1 << lane;
                 }
             }
 
@@ -959,12 +962,14 @@ pub mod fused {
         unsafe {
             use core::arch::x86_64::_mm512_i64gather_epi64;
 
+            // SAFETY: the index array holds eight u64 lanes, exactly one unaligned 512-bit load
             let iv = _mm512_loadu_si512(index.as_ptr() as *const _);
             let mut out = AffNielsV {
                 ypx: [splat(0); 5],
                 ymx: [splat(0); 5],
                 t2d: [splat(0); 5],
             };
+            // SAFETY: every joint digit is below JOINT_ENTRIES, so each gather stays inside its table row
             for i in 0..5 {
                 out.ypx[i] =
                     _mm512_i64gather_epi64::<8>(iv, table.y_plus_x[i].as_ptr() as *const i64);
@@ -988,23 +993,23 @@ pub mod fused {
             let mut m2: u8 = 0;
             let mut zero_mask: u8 = 0;
             let mut sign_mask: u8 = 0;
-            for (l, &d) in digits.iter().enumerate() {
-                if d == 0 {
-                    zero_mask |= 1 << l;
+            for (lane, &digit) in digits.iter().enumerate() {
+                if digit == 0 {
+                    zero_mask |= 1 << lane;
                     continue;
                 }
-                if d < 0 {
-                    sign_mask |= 1 << l;
+                if digit < 0 {
+                    sign_mask |= 1 << lane;
                 }
-                let idx = d.unsigned_abs() - 1;
-                if idx & 1 != 0 {
-                    m0 |= 1 << l;
+                let index = digit.unsigned_abs() - 1;
+                if index & 1 != 0 {
+                    m0 |= 1 << lane;
                 }
-                if idx & 2 != 0 {
-                    m1 |= 1 << l;
+                if index & 2 != 0 {
+                    m1 |= 1 << lane;
                 }
-                if idx & 4 != 0 {
-                    m2 |= 1 << l;
+                if index & 4 != 0 {
+                    m2 |= 1 << lane;
                 }
             }
 
@@ -1056,19 +1061,19 @@ pub mod fused {
             let owned_a: LookupTableX8;
             let table_r: LookupTableX8;
             let (table_a, affine_a): (&LookupTableX8, bool) = match prepared_a {
-                Some(t) => {
+                Some(prepared) => {
                     let (R, r_valid) = decompress_fused(r_encodings);
-                    for (l, ok) in alive.iter_mut().enumerate() {
-                        *ok &= r_valid >> l & 1 == 1;
+                    for (lane, is_alive) in alive.iter_mut().enumerate() {
+                        *is_alive &= r_valid >> lane & 1 == 1;
                     }
                     table_r = build_table(&R);
-                    (t, true)
+                    (prepared, true)
                 }
                 None => {
                     let [(A, a_valid), (R, r_valid)] =
                         decompress_fused_x2(a_encodings, r_encodings);
-                    for (l, ok) in alive.iter_mut().enumerate() {
-                        *ok &= (a_valid & r_valid) >> l & 1 == 1;
+                    for (lane, is_alive) in alive.iter_mut().enumerate() {
+                        *is_alive &= (a_valid & r_valid) >> lane & 1 == 1;
                     }
                     [owned_a, table_r] = build_table_x2(&A, &R);
                     (&owned_a, false)
@@ -1132,64 +1137,65 @@ pub mod fused {
             let x_zero = fis_zero(checked.x);
             let yz_zero = fis_zero(sub_raw_biased(checked.y, checked.z, P64_LO, P64_HI));
 
-            core::array::from_fn(|l| alive[l] && (x_zero & yz_zero) >> l & 1 == 1)
+            core::array::from_fn(|lane| alive[lane] && (x_zero & yz_zero) >> lane & 1 == 1)
         }
     }
 
     #[cfg(test)]
-    mod test {
+    mod tests {
         use super::*;
         use crate::backend::lanes::ifma_x8::available;
 
         // fcanon matches the reduction FieldElement51::to_bytes performs
         #[test]
-        fn fcanon_matches_serial_reduction() {
+        fn canonical_reduction() {
             if !available() {
                 return;
             }
-            const LOW: u64 = (1u64 << 51) - 1;
-            const HI: u64 = (1u64 << 52) - 1;
+            const LOW_MASK: u64 = (1u64 << 51) - 1;
+            const HIGH_MASK: u64 = (1u64 << 52) - 1;
             let cases: [[u64; 5]; LANES] = [
                 [0, 0, 0, 0, 0],
                 [1, 0, 0, 0, 0],
-                [LOW - 19, LOW, LOW, LOW, LOW],
-                [LOW - 18, LOW, LOW, LOW, LOW],
-                [LOW - 17, LOW, LOW, LOW, LOW],
-                [LOW, LOW, LOW, LOW, LOW],
-                [HI, HI, HI, HI, HI],
-                [LOW - 18, LOW, LOW, LOW, LOW - 1],
+                [LOW_MASK - 19, LOW_MASK, LOW_MASK, LOW_MASK, LOW_MASK],
+                [LOW_MASK - 18, LOW_MASK, LOW_MASK, LOW_MASK, LOW_MASK],
+                [LOW_MASK - 17, LOW_MASK, LOW_MASK, LOW_MASK, LOW_MASK],
+                [LOW_MASK, LOW_MASK, LOW_MASK, LOW_MASK, LOW_MASK],
+                [HIGH_MASK, HIGH_MASK, HIGH_MASK, HIGH_MASK, HIGH_MASK],
+                [LOW_MASK - 18, LOW_MASK, LOW_MASK, LOW_MASK, LOW_MASK - 1],
             ];
 
-            let input = FieldElementX8::from_lanes(&core::array::from_fn(|l| {
-                FieldElement51::from_limbs(cases[l])
+            let input = FieldElementX8::from_lanes(&core::array::from_fn(|lane| {
+                FieldElement51::from_limbs(cases[lane])
             }));
+            // SAFETY: the test returned early unless the CPU supports the kernels
             let got = unsafe { store(fcanon(load(&input))) };
 
-            for (l, case) in cases.iter().enumerate() {
+            for (lane, case) in cases.iter().enumerate() {
                 let serial = FieldElement51::from_limbs(*case).to_bytes();
                 let want = FieldElement51::from_bytes(&serial).0;
-                let have: [u64; 5] = core::array::from_fn(|i| got.limbs[i][l]);
-                assert_eq!(have, want, "lane {l}");
+                let have: [u64; 5] = core::array::from_fn(|limb| got.limbs[limb][lane]);
+                assert_eq!(have, want, "lane {lane}");
             }
         }
     }
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
-mod test {
+mod tests {
     use super::*;
     use crate::backend::lanes::field_x8::LANES;
     use crate::backend::serial::u64::field::FieldElement51;
 
-    fn test_elements(seed: u64) -> [FieldElement51; LANES] {
+    fn random_elements(seed: u64) -> [FieldElement51; LANES] {
         let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
         core::array::from_fn(|_| {
             let mut bytes = [0u8; 32];
-            for chunk in bytes.chunks_mut(8) {
+            for word in bytes.chunks_mut(8) {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                chunk.copy_from_slice(&state.to_le_bytes());
+                word.copy_from_slice(&state.to_le_bytes());
             }
             bytes[31] &= 0x7f;
             FieldElement51::from_bytes(&bytes)
@@ -1198,57 +1204,67 @@ mod test {
 
     // every kernel matches the portable lane path, unreduced operands included
     #[test]
-    fn kernels_match_portable() {
+    fn portable_match() {
         if !available() {
             return;
         }
 
-        let a_lanes = test_elements(7);
-        let b_lanes = test_elements(9);
-        let a = FieldElementX8::from_lanes(&a_lanes);
-        let b = FieldElementX8::from_lanes(&b_lanes);
+        let left = FieldElementX8::from_lanes(&random_elements(7));
+        let right = FieldElementX8::from_lanes(&random_elements(9));
         // Limb sums near 2^53 exercise unreduced operands
         let wide = {
-            let mut w = a;
-            for i in 0..5 {
-                for l in 0..LANES {
-                    w.limbs[i][l] = w.limbs[i][l]
-                        .wrapping_add(b.limbs[i][l])
-                        .wrapping_add(b.limbs[i][l]);
+            let mut widened = left;
+            for limb in 0..5 {
+                for lane in 0..LANES {
+                    widened.limbs[limb][lane] = widened.limbs[limb][lane]
+                        .wrapping_add(right.limbs[limb][lane])
+                        .wrapping_add(right.limbs[limb][lane]);
                 }
             }
-            w
+            widened
         };
 
-        let cases = [(&a, &b), (&wide, &b), (&a, &wide), (&wide, &wide)];
-        for (i, (x, y)) in cases.iter().enumerate() {
-            let via_kernel = unsafe { mul_x8(x, y) }.to_bytes_lanes();
-            let via_portable = x.mul(y).to_bytes_lanes();
-            assert_eq!(via_kernel, via_portable, "mul case {i}");
+        let cases = [
+            (&left, &right),
+            (&wide, &right),
+            (&left, &wide),
+            (&wide, &wide),
+        ];
+        for (case, (first, second)) in cases.iter().enumerate() {
+            // SAFETY: the test returned early unless the CPU supports the kernels
+            let via_kernel = unsafe { mul_x8(first, second) }.to_bytes_lanes();
+            let via_portable = first.mul(second).to_bytes_lanes();
+            assert_eq!(via_kernel, via_portable, "mul case {case}");
 
-            let via_kernel = unsafe { add_x8(x, y) }.to_bytes_lanes();
-            let via_portable = x.add(y).to_bytes_lanes();
-            assert_eq!(via_kernel, via_portable, "add case {i}");
+            // SAFETY: the test returned early unless the CPU supports the kernels
+            let via_kernel = unsafe { add_x8(first, second) }.to_bytes_lanes();
+            let via_portable = first.add(second).to_bytes_lanes();
+            assert_eq!(via_kernel, via_portable, "add case {case}");
 
-            let via_kernel = unsafe { sub_x8(x, y) }.to_bytes_lanes();
-            let via_portable = x.sub(y).to_bytes_lanes();
-            assert_eq!(via_kernel, via_portable, "sub case {i}");
+            // SAFETY: the test returned early unless the CPU supports the kernels
+            let via_kernel = unsafe { sub_x8(first, second) }.to_bytes_lanes();
+            let via_portable = first.sub(second).to_bytes_lanes();
+            assert_eq!(via_kernel, via_portable, "sub case {case}");
 
-            let via_kernel = unsafe { square_x8(x) }.to_bytes_lanes();
-            let via_portable = x.square().to_bytes_lanes();
-            assert_eq!(via_kernel, via_portable, "square case {i}");
+            // SAFETY: the test returned early unless the CPU supports the kernels
+            let via_kernel = unsafe { square_x8(first) }.to_bytes_lanes();
+            let via_portable = first.square().to_bytes_lanes();
+            assert_eq!(via_kernel, via_portable, "square case {case}");
 
-            let via_kernel = unsafe { square2_x8(x) }.to_bytes_lanes();
-            let via_portable = x.square2().to_bytes_lanes();
-            assert_eq!(via_kernel, via_portable, "square2 case {i}");
+            // SAFETY: the test returned early unless the CPU supports the kernels
+            let via_kernel = unsafe { square2_x8(first) }.to_bytes_lanes();
+            let via_portable = first.square2().to_bytes_lanes();
+            assert_eq!(via_kernel, via_portable, "square2 case {case}");
 
-            let via_kernel = unsafe { neg_x8(x) }.to_bytes_lanes();
-            let via_portable = x.neg().to_bytes_lanes();
-            assert_eq!(via_kernel, via_portable, "neg case {i}");
+            // SAFETY: the test returned early unless the CPU supports the kernels
+            let via_kernel = unsafe { neg_x8(first) }.to_bytes_lanes();
+            let via_portable = first.neg().to_bytes_lanes();
+            assert_eq!(via_kernel, via_portable, "neg case {case}");
 
-            let via_kernel = unsafe { pow2k_x8(x, 5) }.to_bytes_lanes();
-            let via_portable = x.pow2k(5).to_bytes_lanes();
-            assert_eq!(via_kernel, via_portable, "pow2k case {i}");
+            // SAFETY: the test returned early unless the CPU supports the kernels
+            let via_kernel = unsafe { pow2k_x8(first, 5) }.to_bytes_lanes();
+            let via_portable = first.pow2k(5).to_bytes_lanes();
+            assert_eq!(via_kernel, via_portable, "pow2k case {case}");
         }
     }
 }

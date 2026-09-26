@@ -47,33 +47,35 @@ macro_rules! round {
     }};
 }
 
-/// Run round `$kbase + $slot` for every listed group with one shared K load
+/// Run round `$round_base + $slot` for every listed group with one shared K load
 macro_rules! round_step {
-    (plain, $kbase:expr, $slot:expr
+    (plain, $round_base:expr, $slot:expr
      $(, [$w:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident])+) => {{
-        let k = _mm512_load_si512(K64_X8.0.as_ptr().add($kbase + $slot) as *const _);
+        // SAFETY: round indices stay below the eighty aligned entries of K64_X8
+        let k = _mm512_load_si512(K64_X8.0.as_ptr().add($round_base + $slot) as *const _);
         $( round!(k, $w[$slot % 16], $a, $b, $c, $d, $e, $f, $g, $h); )+
     }};
-    (sched, $kbase:expr, $slot:expr
+    (sched, $round_base:expr, $slot:expr
      $(, [$w:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident])+) => {{
         $( sched!($w, $slot + 1); )+
-        let k = _mm512_load_si512(K64_X8.0.as_ptr().add($kbase + $slot) as *const _);
+        // SAFETY: round indices stay below the eighty aligned entries of K64_X8
+        let k = _mm512_load_si512(K64_X8.0.as_ptr().add($round_base + $slot) as *const _);
         $( round!(k, $w[$slot % 16], $a, $b, $c, $d, $e, $f, $g, $h); )+
     }};
 }
 
 /// Run eight rounds and rotate the state roles one step per round
 macro_rules! rounds8 {
-    ($mode:tt, $kbase:expr, $off:expr
+    ($mode:tt, $round_base:expr, $offset:expr
      $(, [$w:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident])+) => {{
-        round_step!($mode, $kbase, $off + 0 $(, [$w, $a, $b, $c, $d, $e, $f, $g, $h])+);
-        round_step!($mode, $kbase, $off + 1 $(, [$w, $h, $a, $b, $c, $d, $e, $f, $g])+);
-        round_step!($mode, $kbase, $off + 2 $(, [$w, $g, $h, $a, $b, $c, $d, $e, $f])+);
-        round_step!($mode, $kbase, $off + 3 $(, [$w, $f, $g, $h, $a, $b, $c, $d, $e])+);
-        round_step!($mode, $kbase, $off + 4 $(, [$w, $e, $f, $g, $h, $a, $b, $c, $d])+);
-        round_step!($mode, $kbase, $off + 5 $(, [$w, $d, $e, $f, $g, $h, $a, $b, $c])+);
-        round_step!($mode, $kbase, $off + 6 $(, [$w, $c, $d, $e, $f, $g, $h, $a, $b])+);
-        round_step!($mode, $kbase, $off + 7 $(, [$w, $b, $c, $d, $e, $f, $g, $h, $a])+);
+        round_step!($mode, $round_base, $offset + 0 $(, [$w, $a, $b, $c, $d, $e, $f, $g, $h])+);
+        round_step!($mode, $round_base, $offset + 1 $(, [$w, $h, $a, $b, $c, $d, $e, $f, $g])+);
+        round_step!($mode, $round_base, $offset + 2 $(, [$w, $g, $h, $a, $b, $c, $d, $e, $f])+);
+        round_step!($mode, $round_base, $offset + 3 $(, [$w, $f, $g, $h, $a, $b, $c, $d, $e])+);
+        round_step!($mode, $round_base, $offset + 4 $(, [$w, $e, $f, $g, $h, $a, $b, $c, $d])+);
+        round_step!($mode, $round_base, $offset + 5 $(, [$w, $d, $e, $f, $g, $h, $a, $b, $c])+);
+        round_step!($mode, $round_base, $offset + 6 $(, [$w, $c, $d, $e, $f, $g, $h, $a, $b])+);
+        round_step!($mode, $round_base, $offset + 7 $(, [$w, $b, $c, $d, $e, $f, $g, $h, $a])+);
     }};
 }
 
@@ -144,9 +146,9 @@ macro_rules! shr {
 
 /// Emit the eight-lane radix-51 multiplication waves inline, limbs below 2^52 in and out
 macro_rules! mul_waves_raw_emit {
-    ($xe:expr, $ye:expr) => {{
-        let x: [__m512i; 5] = $xe;
-        let y: [__m512i; 5] = $ye;
+    ($left:expr, $right:expr) => {{
+        let x: [__m512i; 5] = $left;
+        let y: [__m512i; 5] = $right;
 
         unsafe {
             // Accumulators for terms with weight 1
@@ -272,8 +274,8 @@ macro_rules! mul_waves_raw_emit {
 
 /// Emit the eight-lane radix-51 squaring waves inline, limbs below 2^52 in and out
 macro_rules! square_waves_raw_emit {
-    ($xe:expr) => {{
-        let x: [__m512i; 5] = $xe;
+    ($input:expr) => {{
+        let x: [__m512i; 5] = $input;
 
         unsafe {
             // Accumulators for terms with weight 2

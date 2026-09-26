@@ -47,14 +47,14 @@ struct KLanes([[u64; LANES]; 80]);
 /// The round constants broadcast across the lanes ahead of time so each round does one load
 static K64_X8: KLanes = {
     let mut rows = [[0u64; LANES]; 80];
-    let mut t = 0;
-    while t < 80 {
-        let mut l = 0;
-        while l < LANES {
-            rows[t][l] = K64[t];
-            l += 1;
+    let mut round = 0;
+    while round < 80 {
+        let mut lane = 0;
+        while lane < LANES {
+            rows[round][lane] = K64[round];
+            lane += 1;
         }
-        t += 1;
+        round += 1;
     }
     KLanes(rows)
 };
@@ -67,6 +67,36 @@ const H512: [u64; 8] = [
 
 /// The SHA-512 block size in bytes
 const BLOCK: usize = 128;
+
+/// Each lane row loads half a block at a time
+const HALF_BLOCK: usize = BLOCK / 2;
+
+/// Bytes in one SHA-512 word
+const WORD_BYTES: usize = 8;
+
+/// Half a block holds this many schedule words
+const HALF_BLOCK_WORDS: usize = HALF_BLOCK / WORD_BYTES;
+
+/// The SHA-512 state holds eight words
+const STATE_WORDS: usize = 8;
+
+/// Bytes in a SHA-512 digest
+const DIGEST_LENGTH: usize = 64;
+
+/// Bytes in an encoded `R` or `A`
+const ENCODING_LENGTH: usize = 32;
+
+/// The `R || A` prefix takes this many bytes of the first block
+const PREFIX_LENGTH: usize = 2 * ENCODING_LENGTH;
+
+/// Padding ends with the message length as a 128-bit big-endian integer
+const LENGTH_FIELD: usize = 16;
+
+/// Padding starts with this byte
+const PAD_MARKER: u8 = 0x80;
+
+/// The length field counts bits
+const BITS_PER_BYTE: u64 = 8;
 
 /// Each lane stages the `R || A` prefix block and up to two padding blocks
 const STAGE_BLOCKS: usize = 3;
@@ -144,72 +174,85 @@ impl Staged {
     /// Stage block 0 and the padded tail of `R || A || M` per lane, leaving the middle in place
     fn fill(
         &mut self,
-        r_bytes: &[[u8; 32]; LANES],
-        a_bytes: &[[u8; 32]; LANES],
+        r_bytes: &[[u8; ENCODING_LENGTH]; LANES],
+        a_bytes: &[[u8; ENCODING_LENGTH]; LANES],
         msgs: &[&[u8]; LANES],
     ) {
-        for l in 0..LANES {
-            let msg = msgs[l];
-            let len = 64 + msg.len();
-            let padded = (len + 1 + 16).div_ceil(BLOCK) * BLOCK;
-            self.blocks[l] = padded / BLOCK;
-            self.max_blocks = self.max_blocks.max(self.blocks[l]);
+        for lane in 0..LANES {
+            let msg = msgs[lane];
+            let length = PREFIX_LENGTH + msg.len();
+            let padded = (length + 1 + LENGTH_FIELD).div_ceil(BLOCK) * BLOCK;
+            self.blocks[lane] = padded / BLOCK;
+            self.max_blocks = self.max_blocks.max(self.blocks[lane]);
 
-            let pb = len / BLOCK;
-            self.pad_block[l] = pb;
-            self.pad_slot[l] = usize::from(pb != 0);
+            let pad_block = length / BLOCK;
+            self.pad_block[lane] = pad_block;
+            self.pad_slot[lane] = usize::from(pad_block != 0);
 
+            // SAFETY: every write stays inside this lane's stage of STAGE_BLOCKS blocks and every read stays inside `msg`
             unsafe {
-                let base = self.stage[l].as_mut_ptr().cast::<u8>();
-                core::ptr::copy_nonoverlapping(r_bytes[l].as_ptr(), base, 32);
-                core::ptr::copy_nonoverlapping(a_bytes[l].as_ptr(), base.add(32), 32);
+                let base = self.stage[lane].as_mut_ptr().cast::<u8>();
+                core::ptr::copy_nonoverlapping(r_bytes[lane].as_ptr(), base, ENCODING_LENGTH);
+                core::ptr::copy_nonoverlapping(
+                    a_bytes[lane].as_ptr(),
+                    base.add(ENCODING_LENGTH),
+                    ENCODING_LENGTH,
+                );
                 core::ptr::copy_nonoverlapping(
                     msg.as_ptr(),
-                    base.add(64),
-                    msg.len().min(BLOCK - 64),
+                    base.add(PREFIX_LENGTH),
+                    msg.len().min(BLOCK - PREFIX_LENGTH),
                 );
 
-                let pad = base.add(self.pad_slot[l] * BLOCK);
-                let used = len - pb * BLOCK;
-                if pb != 0 {
-                    let off = pb * BLOCK - 64;
-                    core::ptr::copy_nonoverlapping(msg.as_ptr().add(off), pad, used);
+                let pad = base.add(self.pad_slot[lane] * BLOCK);
+                let used = length - pad_block * BLOCK;
+                if pad_block != 0 {
+                    let offset = pad_block * BLOCK - PREFIX_LENGTH;
+                    core::ptr::copy_nonoverlapping(msg.as_ptr().add(offset), pad, used);
                 }
-                *pad.add(used) = 0x80;
+                *pad.add(used) = PAD_MARKER;
                 core::ptr::write_bytes(pad.add(used + 1), 0, BLOCK - used - 1);
 
                 // The length goes one block past the marker when the marker block has no room
-                let last = base.add((self.pad_slot[l] + self.blocks[l] - 1 - pb) * BLOCK);
+                let last =
+                    base.add((self.pad_slot[lane] + self.blocks[lane] - 1 - pad_block) * BLOCK);
                 if last != pad {
-                    core::ptr::write_bytes(last, 0, BLOCK - 8);
+                    core::ptr::write_bytes(last, 0, BLOCK - WORD_BYTES);
                 }
                 core::ptr::copy_nonoverlapping(
-                    ((len as u64) * 8).to_be_bytes().as_ptr(),
-                    last.add(BLOCK - 8),
-                    8,
+                    ((length as u64) * BITS_PER_BYTE).to_be_bytes().as_ptr(),
+                    last.add(BLOCK - WORD_BYTES),
+                    WORD_BYTES,
                 );
             }
         }
     }
 
-    /// Return block `b`'s pointer per lane and a mask of live lanes, with spent lanes reading `zero`
+    /// Return one block's pointer per lane and a mask of live lanes, with spent lanes reading `zero`
     #[inline]
-    fn block(&self, msgs: &[&[u8]; LANES], b: usize, zero: *const u8) -> ([*const u8; LANES], u8) {
+    fn block(
+        &self,
+        msgs: &[&[u8]; LANES],
+        block_index: usize,
+        zero: *const u8,
+    ) -> ([*const u8; LANES], u8) {
         let mut active: u8 = 0;
         let mut block = [zero; LANES];
-        for l in 0..LANES {
-            if b >= self.blocks[l] {
+        for lane in 0..LANES {
+            if block_index >= self.blocks[lane] {
                 continue;
             }
-            active |= 1 << l;
-            let base = self.stage[l].as_ptr().cast::<u8>();
-            block[l] = unsafe {
-                if b == 0 {
-                    base
-                } else if b >= self.pad_block[l] {
-                    base.add((self.pad_slot[l] + b - self.pad_block[l]) * BLOCK)
-                } else {
-                    msgs[l].as_ptr().add(b * BLOCK - 64)
+            active |= 1 << lane;
+            let base = self.stage[lane].as_ptr().cast::<u8>();
+            let is_padded = block_index >= self.pad_block[lane];
+            // SAFETY: fill sized the stage for every padded block and the middle blocks lie inside the message
+            block[lane] = unsafe {
+                match (block_index == 0, is_padded) {
+                    (true, _) => base,
+                    (false, true) => {
+                        base.add((self.pad_slot[lane] + block_index - self.pad_block[lane]) * BLOCK)
+                    }
+                    (false, false) => msgs[lane].as_ptr().add(block_index * BLOCK - PREFIX_LENGTH),
                 }
             };
         }
@@ -220,8 +263,8 @@ impl Staged {
 /// The initial SHA-512 state, one message per lane
 #[target_feature(enable = "avx512f")]
 #[inline]
-unsafe fn init_state() -> [__m512i; 8] {
-    unsafe { core::array::from_fn(|i| _mm512_set1_epi64(H512[i] as i64)) }
+unsafe fn init_state() -> [__m512i; STATE_WORDS] {
+    unsafe { core::array::from_fn(|word| _mm512_set1_epi64(H512[word] as i64)) }
 }
 
 /// Load the block's sixteen schedule words, transposed out of the lane rows
@@ -232,10 +275,12 @@ unsafe fn load_schedule(block: &[*const u8; LANES], bswap: __m512i) -> [__m512i;
         let mut w = [_mm512_set1_epi64(0); 16];
         for half in 0..2 {
             let mut rows = [_mm512_set1_epi64(0); LANES];
-            for l in 0..LANES {
-                rows[l] = _mm512_loadu_si512(block[l].add(half * 64) as *const _);
+            for lane in 0..LANES {
+                // SAFETY: block pointed every lane at a full readable block
+                rows[lane] = _mm512_loadu_si512(block[lane].add(half * HALF_BLOCK) as *const _);
             }
-            w[half * 8..half * 8 + 8].copy_from_slice(&transpose_words_x8(&rows, bswap));
+            let words = half * HALF_BLOCK_WORDS..(half + 1) * HALF_BLOCK_WORDS;
+            w[words].copy_from_slice(&transpose_words_x8(&rows, bswap));
         }
         w
     }
@@ -244,16 +289,18 @@ unsafe fn load_schedule(block: &[*const u8; LANES], bswap: __m512i) -> [__m512i;
 /// Extract the big-endian digest of each lane
 #[target_feature(enable = "avx512f")]
 #[inline]
-unsafe fn digests(state: &[__m512i; 8]) -> [[u8; 64]; LANES] {
+unsafe fn digests(state: &[__m512i; STATE_WORDS]) -> [[u8; DIGEST_LENGTH]; LANES] {
     unsafe {
-        let mut words = [[0u64; LANES]; 8];
-        for i in 0..8 {
-            _mm512_storeu_si512(words[i].as_mut_ptr() as *mut _, state[i]);
+        let mut words = [[0u64; LANES]; STATE_WORDS];
+        for word in 0..STATE_WORDS {
+            // SAFETY: each row of `words` holds LANES u64 values, one full vector
+            _mm512_storeu_si512(words[word].as_mut_ptr() as *mut _, state[word]);
         }
-        core::array::from_fn(|l| {
-            let mut digest = [0u8; 64];
-            for i in 0..8 {
-                digest[i * 8..i * 8 + 8].copy_from_slice(&words[i][l].to_be_bytes());
+        core::array::from_fn(|lane| {
+            let mut digest = [0u8; DIGEST_LENGTH];
+            for word in 0..STATE_WORDS {
+                digest[word * WORD_BYTES..(word + 1) * WORD_BYTES]
+                    .copy_from_slice(&words[word][lane].to_be_bytes());
             }
             digest
         })
@@ -263,10 +310,11 @@ unsafe fn digests(state: &[__m512i; 8]) -> [[u8; 64]; LANES] {
 /// Compute the eight digests `SHA-512(R || A || M)`, once `ifma_x8::available()` holds
 #[target_feature(enable = "avx512f,avx512bw")]
 pub unsafe fn challenge_digests_x8(
-    r_bytes: &[[u8; 32]; LANES],
-    a_bytes: &[[u8; 32]; LANES],
+    r_bytes: &[[u8; ENCODING_LENGTH]; LANES],
+    a_bytes: &[[u8; ENCODING_LENGTH]; LANES],
     msgs: &[&[u8]; LANES],
-) -> [[u8; 64]; LANES] {
+) -> [[u8; DIGEST_LENGTH]; LANES] {
+    // SAFETY: the target features of this function cover every kernel it calls
     unsafe {
         let mut staged = Staged::new();
         staged.fill(r_bytes, a_bytes, msgs);
@@ -275,8 +323,8 @@ pub unsafe fn challenge_digests_x8(
         let bswap = _mm512_loadu_si512(BSWAP64.as_ptr() as *const _);
         let mut state = init_state();
 
-        for b in 0..staged.max_blocks {
-            let (block, active) = staged.block(msgs, b, zero_block.as_ptr());
+        for block_index in 0..staged.max_blocks {
+            let (block, active) = staged.block(msgs, block_index, zero_block.as_ptr());
             block_in!(state, block, bswap, w0, a0, b0, c0, d0, e0, f0, g0, h0);
             compress_rounds!([w0, a0, b0, c0, d0, e0, f0, g0, h0]);
             block_out!(state, active, a0, b0, c0, d0, e0, f0, g0, h0);
@@ -289,10 +337,11 @@ pub unsafe fn challenge_digests_x8(
 /// Compute the digests of two groups with their rounds interleaved, once `ifma_x8::available()` holds
 #[target_feature(enable = "avx512f,avx512bw")]
 pub unsafe fn challenge_digests_x16(
-    r_bytes: &[[[u8; 32]; LANES]; 2],
-    a_bytes: &[[[u8; 32]; LANES]; 2],
+    r_bytes: &[[[u8; ENCODING_LENGTH]; LANES]; 2],
+    a_bytes: &[[[u8; ENCODING_LENGTH]; LANES]; 2],
     msgs: &[[&[u8]; LANES]; 2],
-) -> [[[u8; 64]; LANES]; 2] {
+) -> [[[u8; DIGEST_LENGTH]; LANES]; 2] {
+    // SAFETY: the target features of this function cover every kernel it calls
     unsafe {
         let mut staged0 = Staged::new();
         let mut staged1 = Staged::new();
@@ -306,9 +355,9 @@ pub unsafe fn challenge_digests_x16(
         let mut state1 = init_state();
 
         let paired = staged0.max_blocks.min(staged1.max_blocks);
-        for b in 0..paired {
-            let (block0, active0) = staged0.block(&msgs[0], b, zero);
-            let (block1, active1) = staged1.block(&msgs[1], b, zero);
+        for block_index in 0..paired {
+            let (block0, active0) = staged0.block(&msgs[0], block_index, zero);
+            let (block1, active1) = staged1.block(&msgs[1], block_index, zero);
             block_in!(state0, block0, bswap, w0, a0, b0, c0, d0, e0, f0, g0, h0);
             block_in!(state1, block1, bswap, w1, a1, b1, c1, d1, e1, f1, g1, h1);
             compress_rounds!(
@@ -318,14 +367,14 @@ pub unsafe fn challenge_digests_x16(
             block_out!(state0, active0, a0, b0, c0, d0, e0, f0, g0, h0);
             block_out!(state1, active1, a1, b1, c1, d1, e1, f1, g1, h1);
         }
-        for b in paired..staged0.max_blocks {
-            let (block, active) = staged0.block(&msgs[0], b, zero);
+        for block_index in paired..staged0.max_blocks {
+            let (block, active) = staged0.block(&msgs[0], block_index, zero);
             block_in!(state0, block, bswap, w0, a0, b0, c0, d0, e0, f0, g0, h0);
             compress_rounds!([w0, a0, b0, c0, d0, e0, f0, g0, h0]);
             block_out!(state0, active, a0, b0, c0, d0, e0, f0, g0, h0);
         }
-        for b in paired..staged1.max_blocks {
-            let (block, active) = staged1.block(&msgs[1], b, zero);
+        for block_index in paired..staged1.max_blocks {
+            let (block, active) = staged1.block(&msgs[1], block_index, zero);
             block_in!(state1, block, bswap, w1, a1, b1, c1, d1, e1, f1, g1, h1);
             compress_rounds!([w1, a1, b1, c1, d1, e1, f1, g1, h1]);
             block_out!(state1, active, a1, b1, c1, d1, e1, f1, g1, h1);
@@ -336,7 +385,8 @@ pub unsafe fn challenge_digests_x16(
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
-mod test {
+mod tests {
+    use alloc::vec;
     use alloc::vec::Vec;
 
     use sha2::{Digest, Sha512};
@@ -344,22 +394,22 @@ mod test {
     use super::*;
     use crate::backend::lanes::ifma_x8::available;
 
-    /// The digest `sha2` gives for one lane's inputs
+    /// Hash one lane's inputs with the `sha2` crate
     fn expected(r: &[u8; 32], a: &[u8; 32], msg: &[u8]) -> [u8; 64] {
-        let d = Sha512::new()
+        let digest = Sha512::new()
             .chain_update(r)
             .chain_update(a)
             .chain_update(msg)
             .finalize();
         let mut out = [0u8; 64];
-        out.copy_from_slice(&d[..]);
+        out.copy_from_slice(&digest[..]);
         out
     }
 
     /// An xorshift64 generator, so a failing round replays from its seed
-    struct Rng(u64);
+    struct Xorshift(u64);
 
-    impl Rng {
+    impl Xorshift {
         fn next(&mut self) -> u64 {
             self.0 ^= self.0 << 13;
             self.0 ^= self.0 >> 7;
@@ -367,26 +417,26 @@ mod test {
             self.0
         }
 
-        fn bytes(&mut self, n: usize) -> Vec<u8> {
-            (0..n).map(|_| self.next() as u8).collect()
+        fn bytes(&mut self, length: usize) -> Vec<u8> {
+            (0..length).map(|_| self.next() as u8).collect()
         }
 
-        fn fill32(&mut self) -> [u8; 32] {
+        fn encoding(&mut self) -> [u8; 32] {
             core::array::from_fn(|_| self.next() as u8)
         }
     }
 
-    /// The `R` and `A` encodings of eight lanes and the message each one covers
+    /// The `R` and `A` encodings of eight lanes and their messages
     type Group = ([[u8; 32]; LANES], [[u8; 32]; LANES], Vec<Vec<u8>>);
 
     /// One group of eight random lanes
-    fn random_group(rng: &mut Rng) -> Group {
-        let r: [[u8; 32]; LANES] = core::array::from_fn(|_| rng.fill32());
-        let a: [[u8; 32]; LANES] = core::array::from_fn(|_| rng.fill32());
+    fn random_group(random: &mut Xorshift) -> Group {
+        let r: [[u8; 32]; LANES] = core::array::from_fn(|_| random.encoding());
+        let a: [[u8; 32]; LANES] = core::array::from_fn(|_| random.encoding());
         let msgs: Vec<Vec<u8>> = (0..LANES)
             .map(|_| {
-                let len = (rng.next() % 601) as usize;
-                rng.bytes(len)
+                let length = (random.next() % 601) as usize;
+                random.bytes(length)
             })
             .collect();
         (r, a, msgs)
@@ -394,67 +444,74 @@ mod test {
 
     // digests match the sha2 crate across padding boundaries and mixed lengths
     #[test]
-    fn digests_match_sha2() {
+    fn fixed_lengths() {
         if !available() {
             return;
         }
 
         // The hashed length is 64 plus the message length, so these straddle both padding boundaries
-        let msg_lens: [usize; LANES] = [0, 1, 47, 48, 63, 175, 176, 1232];
-        let msgs_data: Vec<Vec<u8>> = msg_lens
+        let message_lengths: [usize; LANES] = [0, 1, 47, 48, 63, 175, 176, 1232];
+        let message_data: Vec<Vec<u8>> = message_lengths
             .iter()
             .enumerate()
-            .map(|(i, &n)| alloc::vec![i as u8 ^ 0xA7; n])
+            .map(|(index, &length)| vec![index as u8 ^ 0xA7; length])
             .collect();
 
-        let r_bytes: [[u8; 32]; LANES] = core::array::from_fn(|l| [l as u8 + 1; 32]);
-        let a_bytes: [[u8; 32]; LANES] = core::array::from_fn(|l| [l as u8 + 101; 32]);
-        let msgs: [&[u8]; LANES] = core::array::from_fn(|l| msgs_data[l].as_slice());
+        let r_bytes: [[u8; 32]; LANES] = core::array::from_fn(|lane| [lane as u8 + 1; 32]);
+        let a_bytes: [[u8; 32]; LANES] = core::array::from_fn(|lane| [lane as u8 + 101; 32]);
+        let msgs: [&[u8]; LANES] = core::array::from_fn(|lane| message_data[lane].as_slice());
 
+        // SAFETY: available() confirmed the AVX-512 features
         let digests = unsafe { challenge_digests_x8(&r_bytes, &a_bytes, &msgs) };
 
-        for l in 0..LANES {
+        for lane in 0..LANES {
             assert_eq!(
-                digests[l][..],
-                expected(&r_bytes[l], &a_bytes[l], msgs[l])[..],
-                "lane {l}"
+                digests[lane][..],
+                expected(&r_bytes[lane], &a_bytes[lane], msgs[lane])[..],
+                "lane {lane}"
             );
         }
     }
 
     // digests match sha2 with every staging boundary in every lane position
     #[test]
-    fn digests_match_sha2_ragged() {
+    fn ragged_lengths() {
         if !available() {
             return;
         }
 
-        const LENS: [usize; 18] = [
+        const LENGTHS: [usize; 18] = [
             0, 1, 47, 48, 63, 64, 65, 111, 127, 128, 129, 175, 176, 191, 192, 200, 1232, 4096,
         ];
 
-        for shift in 0..LENS.len() {
-            let msg_lens: [usize; LANES] =
-                core::array::from_fn(|l| LENS[(l * 5 + shift) % LENS.len()]);
-            let msgs_data: Vec<Vec<u8>> = msg_lens
+        for shift in 0..LENGTHS.len() {
+            let message_lengths: [usize; LANES] =
+                core::array::from_fn(|lane| LENGTHS[(lane * 5 + shift) % LENGTHS.len()]);
+            let message_data: Vec<Vec<u8>> = message_lengths
                 .iter()
                 .enumerate()
-                .map(|(i, &n)| (0..n).map(|j| (i * 31 + j) as u8).collect())
+                .map(|(index, &length)| {
+                    (0..length)
+                        .map(|offset| (index * 31 + offset) as u8)
+                        .collect()
+                })
                 .collect();
 
-            let r_bytes: [[u8; 32]; LANES] = core::array::from_fn(|l| [(l * 7 + shift) as u8; 32]);
+            let r_bytes: [[u8; 32]; LANES] =
+                core::array::from_fn(|lane| [(lane * 7 + shift) as u8; 32]);
             let a_bytes: [[u8; 32]; LANES] =
-                core::array::from_fn(|l| [(l * 13 + shift + 3) as u8; 32]);
-            let msgs: [&[u8]; LANES] = core::array::from_fn(|l| msgs_data[l].as_slice());
+                core::array::from_fn(|lane| [(lane * 13 + shift + 3) as u8; 32]);
+            let msgs: [&[u8]; LANES] = core::array::from_fn(|lane| message_data[lane].as_slice());
 
+            // SAFETY: available() confirmed the AVX-512 features
             let digests = unsafe { challenge_digests_x8(&r_bytes, &a_bytes, &msgs) };
 
-            for l in 0..LANES {
+            for lane in 0..LANES {
                 assert_eq!(
-                    digests[l][..],
-                    expected(&r_bytes[l], &a_bytes[l], msgs[l])[..],
-                    "shift {shift} lane {l} len {}",
-                    msg_lens[l]
+                    digests[lane][..],
+                    expected(&r_bytes[lane], &a_bytes[lane], msgs[lane])[..],
+                    "shift {shift} lane {lane} length {}",
+                    message_lengths[lane]
                 );
             }
         }
@@ -462,22 +519,23 @@ mod test {
 
     // random lengths and bytes match sha2, one group at a time
     #[test]
-    fn digests_match_sha2_random_x8() {
+    fn random_x8() {
         if !available() {
             return;
         }
 
-        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let mut random = Xorshift(0x9E37_79B9_7F4A_7C15);
         for round in 0..2_000 {
-            let (r, a, msgs_data) = random_group(&mut rng);
-            let msgs: [&[u8]; LANES] = core::array::from_fn(|l| msgs_data[l].as_slice());
+            let (r, a, message_data) = random_group(&mut random);
+            let msgs: [&[u8]; LANES] = core::array::from_fn(|lane| message_data[lane].as_slice());
+            // SAFETY: available() confirmed the AVX-512 features
             let digests = unsafe { challenge_digests_x8(&r, &a, &msgs) };
-            for l in 0..LANES {
+            for lane in 0..LANES {
                 assert_eq!(
-                    digests[l][..],
-                    expected(&r[l], &a[l], msgs[l])[..],
-                    "round {round} lane {l} len {}",
-                    msgs[l].len()
+                    digests[lane][..],
+                    expected(&r[lane], &a[lane], msgs[lane])[..],
+                    "round {round} lane {lane} length {}",
+                    msgs[lane].len()
                 );
             }
         }
@@ -485,30 +543,31 @@ mod test {
 
     // random lengths and bytes match sha2, two ragged groups per call
     #[test]
-    fn digests_match_sha2_random_x16() {
+    fn random_x16() {
         if !available() {
             return;
         }
 
-        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let mut random = Xorshift(0x2545_F491_4F6C_DD1D);
         for round in 0..2_000 {
-            let (r0, a0, msgs0_data) = random_group(&mut rng);
-            let (r1, a1, msgs1_data) = random_group(&mut rng);
-            let msgs0: [&[u8]; LANES] = core::array::from_fn(|l| msgs0_data[l].as_slice());
-            let msgs1: [&[u8]; LANES] = core::array::from_fn(|l| msgs1_data[l].as_slice());
+            let (r0, a0, message_data0) = random_group(&mut random);
+            let (r1, a1, message_data1) = random_group(&mut random);
+            let msgs0: [&[u8]; LANES] = core::array::from_fn(|lane| message_data0[lane].as_slice());
+            let msgs1: [&[u8]; LANES] = core::array::from_fn(|lane| message_data1[lane].as_slice());
 
             let r = [r0, r1];
             let a = [a0, a1];
             let msgs = [msgs0, msgs1];
+            // SAFETY: available() confirmed the AVX-512 features
             let digests = unsafe { challenge_digests_x16(&r, &a, &msgs) };
 
-            for g in 0..2 {
-                for l in 0..LANES {
+            for group in 0..2 {
+                for lane in 0..LANES {
                     assert_eq!(
-                        digests[g][l][..],
-                        expected(&r[g][l], &a[g][l], msgs[g][l])[..],
-                        "round {round} group {g} lane {l} len {}",
-                        msgs[g][l].len()
+                        digests[group][lane][..],
+                        expected(&r[group][lane], &a[group][lane], msgs[group][lane])[..],
+                        "round {round} group {group} lane {lane} length {}",
+                        msgs[group][lane].len()
                     );
                 }
             }
@@ -517,18 +576,19 @@ mod test {
 
     // the paired kernel agrees with the single-group kernel lane for lane
     #[test]
-    fn x16_matches_x8() {
+    fn paired_groups() {
         if !available() {
             return;
         }
 
-        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+        let mut random = Xorshift(0xD1B5_4A32_D192_ED03);
         for _ in 0..200 {
-            let (r0, a0, msgs0_data) = random_group(&mut rng);
-            let (r1, a1, msgs1_data) = random_group(&mut rng);
-            let msgs0: [&[u8]; LANES] = core::array::from_fn(|l| msgs0_data[l].as_slice());
-            let msgs1: [&[u8]; LANES] = core::array::from_fn(|l| msgs1_data[l].as_slice());
+            let (r0, a0, message_data0) = random_group(&mut random);
+            let (r1, a1, message_data1) = random_group(&mut random);
+            let msgs0: [&[u8]; LANES] = core::array::from_fn(|lane| message_data0[lane].as_slice());
+            let msgs1: [&[u8]; LANES] = core::array::from_fn(|lane| message_data1[lane].as_slice());
 
+            // SAFETY: available() confirmed the AVX-512 features
             let paired = unsafe { challenge_digests_x16(&[r0, r1], &[a0, a1], &[msgs0, msgs1]) };
             let single0 = unsafe { challenge_digests_x8(&r0, &a0, &msgs0) };
             let single1 = unsafe { challenge_digests_x8(&r1, &a1, &msgs1) };
