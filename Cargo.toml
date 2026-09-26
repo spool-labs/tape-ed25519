@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.89"
 license = "BSD-3-Clause"
-repository = "https://github.com/spool-labs/tapesvm"
+repository = "https://github.com/spool-labs/tape-ed25519"
 description = "Ed25519 verification under the ZIP-215 rules, one signature at a time or eight lanes wide"
 
 [lib]
@@ -37,3 +37,7 @@ solana-ed25519 = "=0.2.4"
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(curve25519_backend, values("simd"))']
+
+# The differential test checks tens of thousands of signatures.
+[profile.dev]
+opt-level = 2
