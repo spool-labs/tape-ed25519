@@ -3,6 +3,7 @@
 #![allow(non_snake_case)]
 
 use super::field_x8::{sqrt_ratio_i_x8, FieldElementX8, LaneMask, LANES};
+use crate::backend::serial::u64::field::FieldElement51;
 use crate::constants::{EDWARDS_D, EDWARDS_D2};
 #[cfg(test)]
 use crate::edwards::EdwardsPoint;
@@ -239,7 +240,7 @@ impl LookupTableX8 {
 /// Lanes that are not valid curve points are reported `false` and hold the identity.
 pub fn decompress_x8(encodings: &[[u8; 32]; LANES]) -> (ExtendedPointX8, LaneMask) {
     let Y = FieldElementX8::from_lanes(&core::array::from_fn(|l| {
-        crate::backend::serial::u64::field::FieldElement51::from_bytes(&encodings[l])
+        FieldElement51::from_bytes(&encodings[l])
     }));
     let Z = FieldElementX8::ONE;
     let YY = Y.square();

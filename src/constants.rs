@@ -9420,8 +9420,6 @@ mod test {
     // each generated entry encodes its odd multiple and survives the interleave
     #[test]
     fn avx2_basepoint_128_table_generation_is_consistent() {
-        use crate::scalar::Scalar;
-
         for (i, lanes) in avx2_basepoint_128_table_entries().iter().enumerate() {
             // Reconstruct the lane elements from the interleaved limbs.
             let vecs = interleave_lanes(lanes);

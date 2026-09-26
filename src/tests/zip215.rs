@@ -6,7 +6,7 @@ use std::format;
 use crate::batch::verify_batch;
 use crate::challenge::challenge;
 use crate::constants::ED25519_BASEPOINT_POINT;
-use crate::edwards::EdwardsPoint;
+use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
 use crate::scalar::Scalar;
 use crate::signature::Signature;
 use crate::tests::util::{hex, low_order_encodings, small_order_cases, ZIP215_MESSAGE};
@@ -128,7 +128,7 @@ fn low_order_forgeries() {
 /// The `-A` the verification equation uses, recovered from the encoded key
 #[allow(non_snake_case)]
 fn negated(key: &VerifyingKey) -> EdwardsPoint {
-    -crate::edwards::CompressedEdwardsY(*key.as_bytes())
+    -CompressedEdwardsY(*key.as_bytes())
         .decompress()
         .expect("a decoded key decompresses")
 }

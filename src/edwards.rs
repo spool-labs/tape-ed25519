@@ -826,6 +826,7 @@ mod test {
     use super::*;
 
     use crate::constants::ED25519_BASEPOINT_TABLE;
+    use crate::scalar::test::LARGEST_UNREDUCED_SCALAR;
 
     /// X coordinate of the basepoint.
     /// = 15112221349535400772501151409588531511454012693041857206046113283949847762202
@@ -1058,7 +1059,7 @@ mod test {
     #[test]
     fn basepoint_tables_unreduced_scalar() {
         let P = &constants::ED25519_BASEPOINT_POINT;
-        let a = crate::scalar::test::LARGEST_UNREDUCED_SCALAR;
+        let a = LARGEST_UNREDUCED_SCALAR;
 
         let table_radix16 = EdwardsBasepointTableRadix16::create(P);
         let table_radix32 = EdwardsBasepointTableRadix32::create(P);
@@ -1202,22 +1203,13 @@ mod test {
         assert!(P1.compress().to_bytes() == P2.compress().to_bytes());
     }
 
-    // Use different multiscalar sizes to hit different internal
-    // parameters.
-
-    mod vartime {
-        use super::super::*;
-        use super::{A_SCALAR, A_TIMES_BASEPOINT, B_SCALAR, DOUBLE_SCALAR_MULT_RESULT};
-
-        /// Test double_scalar_mul_vartime vs ed25519.py
-        #[test]
-        fn double_scalar_mul_basepoint_vs_ed25519py() {
-            let A = A_TIMES_BASEPOINT
-                .decompress()
-                .expect("test point should decompress");
-            let result =
-                EdwardsPoint::vartime_double_scalar_mul_basepoint(&A_SCALAR, &A, &B_SCALAR);
-            assert_eq!(result.compress(), DOUBLE_SCALAR_MULT_RESULT);
-        }
+    /// Test double_scalar_mul_vartime vs ed25519.py
+    #[test]
+    fn double_scalar_mul_basepoint_vs_ed25519py() {
+        let A = A_TIMES_BASEPOINT
+            .decompress()
+            .expect("test point should decompress");
+        let result = EdwardsPoint::vartime_double_scalar_mul_basepoint(&A_SCALAR, &A, &B_SCALAR);
+        assert_eq!(result.compress(), DOUBLE_SCALAR_MULT_RESULT);
     }
 }

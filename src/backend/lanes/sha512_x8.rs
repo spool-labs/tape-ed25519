@@ -362,9 +362,12 @@ pub unsafe fn challenge_digests_x16(
 
 #[cfg(all(test, target_arch = "x86_64"))]
 mod test {
-    use super::*;
     use alloc::vec::Vec;
+
     use sha2::{Digest, Sha512};
+
+    use super::*;
+    use crate::backend::lanes::ifma_x8::available;
 
     /// The digest `sha2` gives for one lane's inputs.
     fn expected(r: &[u8; 32], a: &[u8; 32], msg: &[u8]) -> [u8; 64] {
@@ -417,7 +420,7 @@ mod test {
     // digests match the sha2 crate across padding boundaries and mixed lengths
     #[test]
     fn digests_match_sha2() {
-        if !crate::backend::lanes::ifma_x8::available() {
+        if !available() {
             return;
         }
 
@@ -447,7 +450,7 @@ mod test {
     // digests match sha2 with every staging boundary in every lane position
     #[test]
     fn digests_match_sha2_ragged() {
-        if !crate::backend::lanes::ifma_x8::available() {
+        if !available() {
             return;
         }
 
@@ -485,7 +488,7 @@ mod test {
     // random lengths and bytes match sha2, one group at a time
     #[test]
     fn digests_match_sha2_random_x8() {
-        if !crate::backend::lanes::ifma_x8::available() {
+        if !available() {
             return;
         }
 
@@ -508,7 +511,7 @@ mod test {
     // random lengths and bytes match sha2, two ragged groups per call
     #[test]
     fn digests_match_sha2_random_x16() {
-        if !crate::backend::lanes::ifma_x8::available() {
+        if !available() {
             return;
         }
 
@@ -540,7 +543,7 @@ mod test {
     // the paired kernel agrees with the single-group kernel lane for lane
     #[test]
     fn x16_matches_x8() {
-        if !crate::backend::lanes::ifma_x8::available() {
+        if !available() {
             return;
         }
 

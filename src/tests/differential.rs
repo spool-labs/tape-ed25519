@@ -10,7 +10,10 @@ use alloc::vec::Vec;
 use crate::batch::verify_batch;
 use crate::lanes;
 use crate::signature::Signature;
-use crate::tests::util::{hex, low_order_encodings, signed, small_order_cases, ZIP215_MESSAGE};
+use crate::tests::util::{
+    hex, low_order_encodings, non_canonical_point_encodings, signed, small_order_cases,
+    ZIP215_MESSAGE,
+};
 use crate::verifying_key::verify_encoded;
 
 /// Random cases the harness draws
@@ -131,7 +134,7 @@ fn draw_case(rng: &mut Rng, draw: usize) -> Case {
             bytes[63] &= 0x1f;
         }
         Shape::NonCanonicalKey => {
-            let encodings = crate::tests::util::non_canonical_point_encodings();
+            let encodings = non_canonical_point_encodings();
             key = encodings[rng.below(encodings.len())];
         }
         Shape::LowOrder => {
