@@ -524,13 +524,19 @@ pub unsafe fn pow2k_x8(a: &FieldElementX8, k: u32) -> FieldElementX8 {
 // in-contract for VPMADD52.
 
 pub mod fused {
-    use super::*;
+    use core::arch::x86_64::{__m512i, _mm512_loadu_si512, _mm512_srli_epi64};
+
+    use super::{
+        add, and, carry_reduce, load, madd52lo, mul_waves, mul_waves_raw, splat, square_waves,
+        square_waves_raw, store, sub, P_TIMES_16_HI, P_TIMES_16_LO,
+    };
+    use crate::backend::lanes::digits::GroupDigits;
     use crate::backend::lanes::edwards_x8::{ExtendedPointX8, LookupTableX8, ProjectiveNielsX8};
     use crate::backend::lanes::field_x8::{FieldElementX8, LaneMask, LANES};
-    use crate::backend::lanes::joint::{JointTable, JOINT_TABLE_B};
-    use crate::backend::lanes::GroupDigits;
-    use crate::backend::serial::u64::constants::{EDWARDS_D, EDWARDS_D2, SQRT_M1};
+    use crate::backend::lanes::joint::JointTable;
+    use crate::backend::lanes::joint_data::JOINT_TABLE_B;
     use crate::backend::serial::u64::field::FieldElement51;
+    use crate::constants::{EDWARDS_D, EDWARDS_D2, SQRT_M1};
 
     type V = [__m512i; 5];
 
@@ -1452,6 +1458,7 @@ pub mod fused {
     #[cfg(test)]
     mod test {
         use super::*;
+        use crate::backend::lanes::ifma_x8::available;
 
         // fcanon matches the reduction FieldElement51::to_bytes performs
         #[test]

@@ -1,6 +1,6 @@
 //! A verifying key, decompressed once, and the single-signature check over it
 
-use crate::backend;
+use crate::backend::dispatch;
 use crate::challenge::challenge;
 use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
 use crate::error::Error;
@@ -77,7 +77,7 @@ pub fn verify(key: &VerifyingKey, signature: &Signature, message: &[u8]) -> Resu
         true => -key.minus_a,
         false => key.minus_a,
     };
-    let result = backend::vartime_triple_base_mul_128_128_256_prechecked(
+    let result = dispatch::vartime_triple_base_mul_128_128_256_prechecked(
         &tau,
         &minus_r,
         &rho,

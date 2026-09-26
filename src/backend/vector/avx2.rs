@@ -7,5 +7,3 @@ pub mod field;
 pub mod edwards;
 
 pub mod constants;
-
-pub use self::edwards::{CachedPoint, ExtendedPoint};

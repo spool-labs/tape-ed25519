@@ -2,6 +2,7 @@
 
 //! Digit schedules for the radix-16 rounds of the lane verifier.
 
+use crate::backend::lanes::field_x8::LANES;
 use crate::scalar::Scalar;
 
 /// Radix-16 positions a 129-bit scalar can occupy.
@@ -15,6 +16,18 @@ const JOINT_SPLIT: usize = 128;
 
 /// Bits per radix-16 digit.
 const WINDOW: usize = 4;
+
+/// The per-lane radix-16 digit schedules of the HEEA-transformed verification equation.
+pub struct GroupDigits {
+    /// Joint fixed-base table index per lane, one row per position.
+    pub b: [[u64; LANES]; HEEA_DIGITS],
+    /// Digits applied to A, with the HEEA sign folded in.
+    pub a: [[i8; HEEA_DIGITS]; LANES],
+    /// Digits applied to R.
+    pub r: [[i8; HEEA_DIGITS]; LANES],
+    /// Highest position with any nonzero digit.
+    pub start: usize,
+}
 
 /// Signed radix-16 digits of a scalar below 2^129, truncated to the HEEA window
 pub fn signed_digits(scalar: &Scalar) -> [i8; HEEA_DIGITS] {

@@ -3,7 +3,7 @@
 #![allow(non_snake_case)]
 
 use super::field_x8::{sqrt_ratio_i_x8, FieldElementX8, LaneMask, LANES};
-use crate::backend::serial::u64::constants::{EDWARDS_D, EDWARDS_D2};
+use crate::constants::{EDWARDS_D, EDWARDS_D2};
 #[cfg(test)]
 use crate::edwards::EdwardsPoint;
 

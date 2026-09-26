@@ -84,8 +84,6 @@
 // affine and projective cakes and eat both of them too.
 #![allow(non_snake_case)]
 
-mod affine;
-
 use core::array::TryFromSliceError;
 use core::borrow::Borrow;
 use core::fmt::Debug;
@@ -95,10 +93,10 @@ use core::ops::{AddAssign, SubAssign};
 use core::ops::{Mul, MulAssign};
 
 use subtle::Choice;
-use subtle::ConditionallyNegatable;
 use subtle::ConditionallySelectable;
 use subtle::ConstantTimeEq;
 
+use crate::backend::dispatch;
 use crate::constants;
 
 use crate::field::FieldElement;
@@ -120,7 +118,7 @@ use crate::traits::BasepointTable;
 use crate::traits::ValidityCheck;
 use crate::traits::{Identity, IsIdentity};
 
-use affine::AffinePoint;
+use crate::affine::AffinePoint;
 
 use alloc::vec::Vec;
 
@@ -183,7 +181,11 @@ impl CompressedEdwardsY {
 }
 
 mod decompress {
-    use super::*;
+    use subtle::{Choice, ConditionallyNegatable};
+
+    use crate::constants;
+    use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
+    use crate::field::FieldElement;
 
     #[rustfmt::skip] // keep alignment of explanatory comments
     pub fn step_1(
@@ -545,7 +547,7 @@ impl<'a> Mul<&'a Scalar> for &EdwardsPoint {
     /// For scalar multiplication of a basepoint,
     /// `EdwardsBasepointTable` is approximately 4x faster.
     fn mul(self, scalar: &'a Scalar) -> EdwardsPoint {
-        crate::backend::variable_base_mul(self, scalar)
+        dispatch::variable_base_mul(self, scalar)
     }
 }
 
@@ -615,7 +617,7 @@ impl EdwardsPoint {
         A: &EdwardsPoint,
         b: &Scalar,
     ) -> EdwardsPoint {
-        crate::backend::vartime_double_base_mul(a, A, b)
+        dispatch::vartime_double_base_mul(a, A, b)
     }
 }
 

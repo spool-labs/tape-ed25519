@@ -8,13 +8,13 @@
 
 use alloc::vec::Vec;
 
+use crate::backend::lanes::digits::GroupDigits;
 use crate::backend::lanes::digits::{joint_digits, negate, signed_digits, HEEA_DIGITS};
 use crate::backend::lanes::edwards_x8::{
     decompress_x8, CompletedPointX8, ExtendedPointX8, LookupTableX8, ProjectivePointX8,
 };
 use crate::backend::lanes::field_x8::{LaneMask, LANES};
-use crate::backend::lanes::joint::JOINT_TABLE_B;
-use crate::backend::lanes::GroupDigits;
+use crate::backend::lanes::joint_data::JOINT_TABLE_B;
 use crate::challenge::challenge;
 use crate::scalar::Scalar;
 use crate::signature::{Signature, HALF_LENGTH};

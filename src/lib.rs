@@ -16,11 +16,13 @@ extern crate std;
 #[macro_use]
 mod macros;
 
+mod affine;
 mod backend;
 mod challenge;
 mod constants;
 mod edwards;
 mod field;
+mod heea;
 mod lanes;
 mod scalar;
 mod traits;

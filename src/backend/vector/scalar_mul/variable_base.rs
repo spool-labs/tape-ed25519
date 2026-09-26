@@ -4,10 +4,10 @@
 pub mod spec {
 
     #[for_target_feature("avx2")]
-    use crate::backend::vector::avx2::{CachedPoint, ExtendedPoint};
+    use crate::backend::vector::avx2::edwards::{CachedPoint, ExtendedPoint};
 
     #[for_target_feature("avx512ifma")]
-    use crate::backend::vector::ifma::{CachedPoint, ExtendedPoint};
+    use crate::backend::vector::ifma::edwards::{CachedPoint, ExtendedPoint};
 
     use crate::edwards::EdwardsPoint;
     use crate::scalar::Scalar;

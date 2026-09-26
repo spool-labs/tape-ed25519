@@ -117,11 +117,8 @@ use subtle::CtOption;
 
 use crate::backend;
 use crate::constants;
-use crate::scalar::heea::{curve25519_heea_vartime_lehmer, I256};
+use crate::heea::{curve25519_heea_vartime_lehmer, HEEA_MAX_INDEX, I256};
 use crate::traits::HEEADecomposition;
-
-mod heea;
-pub use heea::HEEA_MAX_INDEX;
 
 pub const NAF_128_SIZE: usize = HEEA_MAX_INDEX + 1;
 

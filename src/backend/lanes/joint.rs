@@ -4,7 +4,6 @@
 
 use super::edwards_x8::ProjectiveNielsX8;
 use super::field_x8::LANES;
-pub use super::joint_data::JOINT_TABLE_B;
 
 /// Table entries, one per low and high digit pair.
 pub const JOINT_ENTRIES: usize = 256;
@@ -38,6 +37,7 @@ mod test {
     use alloc::vec::Vec;
 
     use super::*;
+    use crate::backend::lanes::joint_data::JOINT_TABLE_B;
     use crate::backend::serial::u64::field::FieldElement51;
     use crate::constants::ED25519_BASEPOINT_POINT;
     use crate::edwards::EdwardsPoint;

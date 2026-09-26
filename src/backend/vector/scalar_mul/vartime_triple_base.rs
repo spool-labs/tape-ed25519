@@ -8,10 +8,10 @@ pub mod spec {
     use core::cmp::Ordering;
 
     #[for_target_feature("avx2")]
-    use crate::backend::vector::avx2::{CachedPoint, ExtendedPoint};
+    use crate::backend::vector::avx2::edwards::{CachedPoint, ExtendedPoint};
 
     #[for_target_feature("avx512ifma")]
-    use crate::backend::vector::ifma::{CachedPoint, ExtendedPoint};
+    use crate::backend::vector::ifma::edwards::{CachedPoint, ExtendedPoint};
 
     #[for_target_feature("avx2")]
     use crate::backend::vector::avx2::constants::BASEPOINT_128_ODD_LOOKUP_TABLE;
@@ -25,8 +25,8 @@ pub mod spec {
     use crate::backend::vector::ifma::constants::BASEPOINT_ODD_LOOKUP_TABLE;
 
     use crate::edwards::EdwardsPoint;
+    use crate::heea::HEEA_MAX_INDEX;
     use crate::scalar::Scalar;
-    use crate::scalar::HEEA_MAX_INDEX;
     #[allow(unused_imports)]
     use crate::traits::Identity;
     use crate::window::NafLookupTable5;

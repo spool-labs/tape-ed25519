@@ -1,4 +1,4 @@
-use super::{CompressedEdwardsY, EdwardsPoint};
+use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
 use crate::field::FieldElement;
 use crate::scalar::Scalar;
 use crate::traits::Identity;
