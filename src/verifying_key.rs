@@ -6,6 +6,7 @@ use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
 use crate::error::Error;
 use crate::scalar::Scalar;
 use crate::signature::Signature;
+use crate::small_order::is_small_order_encoding;
 use crate::traits::{HEEADecomposition, IsIdentity};
 
 /// Bytes in an encoded verifying key
@@ -19,8 +20,11 @@ pub struct VerifyingKey {
 }
 
 impl VerifyingKey {
-    /// Decompress 32 bytes, non-canonical encodings included
+    /// Decompress 32 bytes, non-canonical encodings included and small-order points refused
     pub fn from_bytes(bytes: &[u8; VERIFYING_KEY_LENGTH]) -> Result<Self, Error> {
+        if is_small_order_encoding(bytes) {
+            return Err(Error::SmallOrderPublicKey);
+        }
         let point = CompressedEdwardsY(*bytes)
             .decompress()
             .ok_or(Error::MalformedPublicKey)?;

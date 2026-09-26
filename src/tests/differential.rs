@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use crate::batch::verify_batch;
 use crate::lanes::{self, Item};
 use crate::signature::{Signature, HALF_LENGTH, SIGNATURE_LENGTH};
+use crate::small_order::is_small_order_encoding;
 use crate::tests::util::{
     hex, low_order_encodings, non_canonical_point_encodings, signed, small_order_cases,
     ZIP215_MESSAGE,
@@ -188,7 +189,7 @@ fn edge_cases() -> Vec<Case> {
     cases
 }
 
-// verify, verify_batch and the lane pipeline all agree with verify_zebra on every case
+// verify, verify_batch and the lane pipeline agree with verify_zebra except on small-order keys
 #[test]
 fn matches_zebra() {
     let mut generator = Generator(0x2026_0918_1200_0001);
@@ -212,7 +213,7 @@ fn matches_zebra() {
 
     let mut accepted = 0usize;
     for (index, case) in cases.iter().enumerate() {
-        let expected = zebra_verdict(case);
+        let expected = zebra_verdict(case) && !is_small_order_encoding(&case.key);
         let single = verify_encoded(&case.key, &items[index].1, &case.message);
 
         assert_eq!(

@@ -21,6 +21,7 @@ mod field;
 mod heea;
 mod lanes;
 mod scalar;
+
 mod traits;
 mod window;
 
@@ -30,4 +31,5 @@ mod tests;
 pub mod batch;
 pub mod error;
 pub mod signature;
+pub mod small_order;
 pub mod verifying_key;

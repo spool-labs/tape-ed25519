@@ -9,6 +9,10 @@ pub enum Error {
     #[error("malformed public key")]
     MalformedPublicKey,
 
+    /// The key decodes to a small-order point, so a signature under it proves nothing
+    #[error("small order public key")]
+    SmallOrderPublicKey,
+
     /// The signature does not verify over this message under this key
     #[error("invalid signature")]
     InvalidSignature,

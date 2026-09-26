@@ -12,6 +12,7 @@ use crate::backend::lanes::joint_data::JOINT_TABLE_B;
 use crate::challenge::challenge;
 use crate::scalar::Scalar;
 use crate::signature::{Signature, HALF_LENGTH};
+use crate::small_order::is_small_order_encoding;
 use crate::traits::HEEADecomposition;
 use crate::verifying_key::{verify_encoded, VERIFYING_KEY_LENGTH};
 
@@ -121,6 +122,9 @@ pub fn verify_batch(items: &[Item<'_>]) -> Vec<bool> {
         }
     }
 
+    for (verdict, (encoded, _, _)) in verdicts.iter_mut().zip(items) {
+        *verdict &= !is_small_order_encoding(encoded);
+    }
     verdicts
 }
 

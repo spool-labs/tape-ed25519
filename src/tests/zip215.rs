@@ -43,17 +43,16 @@ fn strict_verdict(
         .is_ok()
 }
 
-// every low-order pair with s = 0 is accepted under ZIP-215 and refused under the strict rules
+// every low-order pair with s = 0 passes plain ZIP-215 and is refused here and under the strict rules
 #[test]
 fn low_order() {
     let cases = small_order_cases();
     assert_eq!(cases.len(), LOW_ORDER_COUNT * LOW_ORDER_COUNT);
 
     for case in &cases {
-        assert_eq!(
-            zip215_verdict(&case.key, &case.signature, ZIP215_MESSAGE),
-            case.is_valid_zip215,
-            "zip215 verdict for key={} signature={}",
+        assert!(
+            case.is_valid_zip215 && !zip215_verdict(&case.key, &case.signature, ZIP215_MESSAGE),
+            "ZIP-215 accepts it and this crate refuses it: key={} signature={}",
             hex(&case.key),
             hex(&case.signature),
         );
@@ -104,7 +103,6 @@ fn forgeries() {
 
     let mut forgeable = 0usize;
     for key_bytes in low_order_encodings() {
-        let key = VerifyingKey::from_bytes(&key_bytes).expect("low-order keys decode");
         let mut is_found = false;
 
         for attempt in 0..GRIND_ATTEMPTS {
@@ -114,7 +112,7 @@ fn forgeries() {
             let challenge_scalar = challenge(&r_bytes, &key_bytes, &message);
             let expected_r = EdwardsPoint::vartime_double_scalar_mul_basepoint(
                 &challenge_scalar,
-                &negated(&key),
+                &negated(&key_bytes),
                 &s,
             )
             .compress();
@@ -142,8 +140,8 @@ fn forgeries() {
 }
 
 /// Recover the negated key point from the encoded key
-fn negated(key: &VerifyingKey) -> EdwardsPoint {
-    -CompressedEdwardsY(*key.as_bytes())
+fn negated(key: &[u8; VERIFYING_KEY_LENGTH]) -> EdwardsPoint {
+    -CompressedEdwardsY(*key)
         .decompress()
-        .expect("a decoded key decompresses")
+        .expect("a low-order key decompresses")
 }
