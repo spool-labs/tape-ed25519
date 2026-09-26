@@ -120,10 +120,12 @@ use core::ops::{Add, Neg, Sub};
 use subtle::Choice;
 use subtle::ConditionallySelectable;
 
+#[cfg(test)]
 use crate::constants;
 
 use crate::edwards::EdwardsPoint;
 use crate::field::FieldElement;
+#[cfg(test)]
 use crate::traits::ValidityCheck;
 
 // ------------------------------------------------------------------------
@@ -242,6 +244,7 @@ impl Default for AffineNielsPoint {
 // Validity checks (for debugging, not CT)
 // ------------------------------------------------------------------------
 
+#[cfg(test)]
 impl ValidityCheck for ProjectivePoint {
     fn is_valid(&self) -> bool {
         // Curve equation is    -x^2 + y^2 = 1 + d*x^2*y^2,

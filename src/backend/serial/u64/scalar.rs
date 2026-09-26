@@ -305,7 +305,6 @@ impl Scalar52 {
     /// Compute `a^2` (mod l)
     #[inline(never)]
     #[allow(unused_mut)]
-    #[allow(dead_code)] // XXX we don't expose square() via the Scalar API
     pub fn square(&self) -> Scalar52 {
         let mut aa_limbs = Scalar52::square_internal(self);
         let mut aa = Scalar52::montgomery_reduce(&aa_limbs);

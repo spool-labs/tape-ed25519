@@ -116,6 +116,7 @@ use crate::window::{
 
 use crate::traits::BasepointTable;
 
+#[cfg(test)]
 use crate::traits::ValidityCheck;
 use crate::traits::{Identity, IsIdentity};
 
@@ -305,6 +306,7 @@ impl Default for EdwardsPoint {
 // Validity checks (for debugging, not CT)
 // ------------------------------------------------------------------------
 
+#[cfg(test)]
 impl ValidityCheck for EdwardsPoint {
     fn is_valid(&self) -> bool {
         let point_on_curve = self.as_projective().is_valid();

@@ -147,7 +147,6 @@ macro_rules! impl_shared {
         }
 
         #[unsafe_target_feature("avx2")]
-        #[allow(dead_code)]
         impl $ty {
             #[inline]
             pub fn shl<const N: i32>(self) -> Self {
@@ -233,7 +232,6 @@ impl_shared!(
 
 impl_conv!(u64x4 => u32x8);
 
-#[allow(dead_code)]
 impl u64x4 {
     /// A constified variant of `new`.
     ///
@@ -275,7 +273,6 @@ impl u64x4 {
     }
 }
 
-#[allow(dead_code)]
 impl u32x8 {
     /// A constified variant of `new`.
     ///
