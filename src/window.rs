@@ -6,16 +6,11 @@
 
 use core::fmt::Debug;
 
-use subtle::Choice;
-use subtle::ConditionallyNegatable;
-use subtle::ConditionallySelectable;
-use subtle::ConstantTimeEq;
+use subtle::{Choice, ConditionallyNegatable, ConditionallySelectable, ConstantTimeEq};
 
-use crate::traits::Identity;
-
-use crate::backend::serial::curve_models::AffineNielsPoint;
-use crate::backend::serial::curve_models::ProjectiveNielsPoint;
+use crate::backend::serial::curve_models::{AffineNielsPoint, ProjectiveNielsPoint};
 use crate::edwards::EdwardsPoint;
+use crate::traits::Identity;
 
 // The radix-16 table is plain `LookupTable` because the precomputed constants build it
 impl_lookup_table! {
@@ -56,6 +51,7 @@ impl_lookup_table! {
     ConversionRange = 0..127
 }
 
+/// The radix-16 lookup table aliased to match the other radix tables
 pub type LookupTableRadix16<Point> = LookupTable<Point>;
 
 /// The odd multiples A, 3A, ..., 15A of a point A
@@ -123,8 +119,6 @@ impl<Point: Debug> Debug for NafLookupTable8<Point> {
         write!(f, "])")
     }
 }
-
-impl NafLookupTable8<AffineNielsPoint> {}
 
 impl From<&EdwardsPoint> for NafLookupTable8<ProjectiveNielsPoint> {
     fn from(A: &EdwardsPoint) -> Self {

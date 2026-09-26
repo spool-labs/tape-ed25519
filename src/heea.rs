@@ -2,7 +2,8 @@
 
 // Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
-use core::ops::Neg;
+use core::cmp::Ordering;
+use core::ops::{Neg, Shl};
 
 use crate::constants;
 
@@ -10,10 +11,20 @@ use crate::constants;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct I256 {
     limbs: [u64; 4],
-    negative: bool,
+    is_negative: bool,
 }
 
+/// Every digit of a half-size scalar sits at or below this bit position
 pub const HEEA_MAX_INDEX: usize = 129;
+
+/// The group order l is this many bits long
+const ORDER_BITS: u32 = 253;
+
+/// The loop stops once the remainder fits in this many bits
+const HALF_SIZE_BITS: u32 = 127;
+
+/// A tau longer than this sends the batched result to the exact algorithm
+const TAU_LIMIT_BITS: u32 = 130;
 
 /// Return signed `(rho, tau)` with `rho = tau v mod l`, one exact step at a time
 pub fn curve25519_heea_vartime(v: I256) -> (I256, I256) {
@@ -25,15 +36,14 @@ pub fn curve25519_heea_vartime(v: I256) -> (I256, I256) {
     let mut t0: I256 = I256::ZERO;
     let mut t1: I256 = I256::ONE;
 
-    // The group order l is 253 bits long
-    let mut bl_r0 = 253u32;
+    let mut bl_r0 = ORDER_BITS;
     let mut bl_r1 = bit_length_i256(r1);
 
-    while bl_r1 > 127 {
+    while bl_r1 > HALF_SIZE_BITS {
         let s = bl_r0 - bl_r1;
 
-        let sign_r0 = r0.is_negative();
-        let sign_r1 = r1.is_negative();
+        let sign_r0 = r0.is_below_zero();
+        let sign_r1 = r1.is_below_zero();
 
         let (r, t) = if sign_r0 == sign_r1 {
             (r0.wrapping_sub(r1 << s), t0.wrapping_sub(t1 << s))
@@ -237,7 +247,7 @@ pub fn curve25519_heea_vartime_lehmer(v: I256) -> (I256, I256) {
     let mut bl_r0 = bit_length(&m0);
     let mut bl_r1 = bit_length(&m1);
 
-    'outer: while bl_r1 > 127 {
+    'outer: while bl_r1 > HALF_SIZE_BITS {
         let e = bl_r0.saturating_sub(WINDOW);
         let mut a0 = approx(&m0, n0, e);
         let mut a1 = approx(&m1, n1, e);
@@ -245,10 +255,10 @@ pub fn curve25519_heea_vartime_lehmer(v: I256) -> (I256, I256) {
         let mut ab1 = bl_r1;
         let mut m = [1i64, 0, 0, 1];
         let mut mat_bits: u32 = 1;
-        let mut progressed = false;
+        let mut has_progressed = false;
 
         loop {
-            if ab1 <= 127 {
+            if ab1 <= HALF_SIZE_BITS {
                 break;
             }
             let s = ab0 - ab1;
@@ -267,15 +277,15 @@ pub fn curve25519_heea_vartime_lehmer(v: I256) -> (I256, I256) {
             let row0 = m[0] - (((m[2] << s) ^ flip) - flip);
             let row1 = m[1] - (((m[3] << s) ^ flip) - flip);
             mat_bits += s + 1;
-            progressed = true;
+            has_progressed = true;
 
             // A result longer than the smaller term replaces a0, a shorter one rotates the pair
-            let grew = bl_new > ab1;
-            let na0 = if grew { a } else { a1 };
-            let na1 = if grew { a1 } else { a };
-            let nb0 = if grew { bl_new } else { ab1 };
-            let nb1 = if grew { ab1 } else { bl_new };
-            m = if grew {
+            let has_grown = bl_new > ab1;
+            let na0 = if has_grown { a } else { a1 };
+            let na1 = if has_grown { a1 } else { a };
+            let nb0 = if has_grown { bl_new } else { ab1 };
+            let nb1 = if has_grown { ab1 } else { bl_new };
+            m = if has_grown {
                 [row0, row1, m[2], m[3]]
             } else {
                 [m[2], m[3], row0, row1]
@@ -286,7 +296,7 @@ pub fn curve25519_heea_vartime_lehmer(v: I256) -> (I256, I256) {
             ab1 = nb1;
         }
 
-        if progressed {
+        if has_progressed {
             let nr0 = linear(m[0], &r0, m[1], &r1);
             let nr1 = linear(m[2], &r0, m[3], &r1);
             let nt0 = linear(m[0], &t0, m[1], &t1);
@@ -345,7 +355,10 @@ pub fn curve25519_heea_vartime_lehmer(v: I256) -> (I256, I256) {
 
     let (rho, tau) = (limbs_to_i256(&r1), limbs_to_i256(&t1));
     // A result outside the half-size shape falls back to the exact algorithm
-    if bit_length_i256(rho) > 127 || bit_length_i256(tau) > 130 || tau.is_zero() {
+    if bit_length_i256(rho) > HALF_SIZE_BITS
+        || bit_length_i256(tau) > TAU_LIMIT_BITS
+        || tau.is_zero()
+    {
         return curve25519_heea_vartime(v);
     }
     (rho, tau)
@@ -367,28 +380,28 @@ fn bit_length_i256(v: I256) -> u32 {
 impl I256 {
     pub const ZERO: Self = I256 {
         limbs: [0, 0, 0, 0],
-        negative: false,
+        is_negative: false,
     };
 
     const ONE: Self = I256 {
         limbs: [1, 0, 0, 0],
-        negative: false,
+        is_negative: false,
     };
 
     #[inline(always)]
     const fn abs(&self) -> Self {
         I256 {
             limbs: self.limbs,
-            negative: false,
+            is_negative: false,
         }
     }
 
     #[cfg(test)]
-    pub fn new(a: i128) -> Self {
-        let mag: u128 = a.unsigned_abs();
+    pub fn new(value: i128) -> Self {
+        let mag: u128 = value.unsigned_abs();
         I256 {
             limbs: [mag as u64, (mag >> 64) as u64, 0, 0],
-            negative: a.is_negative(),
+            is_negative: value.is_negative(),
         }
     }
 
@@ -412,7 +425,7 @@ impl I256 {
                     bytes[31],
                 ]),
             ],
-            negative: false,
+            is_negative: false,
         }
     }
 
@@ -463,8 +476,8 @@ impl I256 {
 
     /// Check whether the value is below zero
     #[inline(always)]
-    fn is_negative(&self) -> bool {
-        self.negative && !self.is_zero()
+    fn is_below_zero(&self) -> bool {
+        self.is_negative && !self.is_zero()
     }
 
     /// Flip the sign, keeping zero non-negative
@@ -475,37 +488,37 @@ impl I256 {
         }
         I256 {
             limbs: self.limbs,
-            negative: !self.negative,
+            is_negative: !self.is_negative,
         }
     }
 
     /// Add two signed values
     #[inline(always)]
     fn wrapping_add(self, rhs: Self) -> Self {
-        if self.negative == rhs.negative {
+        if self.is_negative == rhs.is_negative {
             let (limbs, _overflow) = add_limbs(&self.limbs, &rhs.limbs);
             I256 {
                 limbs,
-                negative: self.negative,
+                is_negative: self.is_negative,
             }
         } else {
             let cmp = cmp_magnitude(&self.limbs, &rhs.limbs);
             match cmp {
-                core::cmp::Ordering::Greater => {
+                Ordering::Greater => {
                     let (limbs, _underflow) = sub_limbs(&self.limbs, &rhs.limbs);
                     I256 {
                         limbs,
-                        negative: self.negative,
+                        is_negative: self.is_negative,
                     }
                 }
-                core::cmp::Ordering::Less => {
+                Ordering::Less => {
                     let (limbs, _underflow) = sub_limbs(&rhs.limbs, &self.limbs);
                     I256 {
                         limbs,
-                        negative: rhs.negative,
+                        is_negative: rhs.is_negative,
                     }
                 }
-                core::cmp::Ordering::Equal => Self::ZERO,
+                Ordering::Equal => Self::ZERO,
             }
         }
     }
@@ -575,7 +588,7 @@ impl I256 {
 
         I256 {
             limbs: result,
-            negative: self.negative,
+            is_negative: self.is_negative,
         }
     }
 }
@@ -641,27 +654,25 @@ fn sub_limbs(a: &[u64; 4], b: &[u64; 4]) -> ([u64; 4], bool) {
 
 /// Compare two magnitudes
 #[inline(always)]
-fn cmp_magnitude(a: &[u64; 4], b: &[u64; 4]) -> core::cmp::Ordering {
+fn cmp_magnitude(a: &[u64; 4], b: &[u64; 4]) -> Ordering {
     for i in (0..4).rev() {
         match a[i].cmp(&b[i]) {
-            core::cmp::Ordering::Equal => continue,
-            other => return other,
+            Ordering::Equal => continue,
+            ordering @ (Ordering::Less | Ordering::Greater) => return ordering,
         }
     }
-    core::cmp::Ordering::Equal
+    Ordering::Equal
 }
 
 impl PartialOrd for I256 {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for I256 {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        use core::cmp::Ordering;
-
-        match (self.negative, other.negative) {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.is_negative, other.is_negative) {
             (true, false) => Ordering::Less,
             (false, true) => Ordering::Greater,
             (false, false) => cmp_magnitude(&self.limbs, &other.limbs),
@@ -670,7 +681,7 @@ impl Ord for I256 {
     }
 }
 
-impl core::ops::Shl<u32> for I256 {
+impl Shl<u32> for I256 {
     type Output = Self;
     fn shl(self, rhs: u32) -> Self {
         self.wrapping_shl(rhs)
@@ -683,7 +694,7 @@ mod tests {
 
     // Lehmer batching matches the exact iteration on the degenerate inputs
     #[test]
-    fn lehmer_edge_cases_match_exact() {
+    fn lehmer_edges() {
         let cases = [
             I256::ZERO,
             I256::ONE,
@@ -694,18 +705,18 @@ mod tests {
             I256::ONE << 127,
             I256::ONE << 128,
         ];
-        for (i, v) in cases.into_iter().enumerate() {
+        for (index, value) in cases.into_iter().enumerate() {
             assert_eq!(
-                curve25519_heea_vartime_lehmer(v),
-                curve25519_heea_vartime(v),
-                "edge case {i}"
+                curve25519_heea_vartime_lehmer(value),
+                curve25519_heea_vartime(value),
+                "edge case {index}"
             );
         }
     }
 
     // the exact iteration returns the expected pairs at zero, one, minus one and large inputs
     #[test]
-    fn test_heea_edge_cases() {
+    fn exact_edges() {
         // Zero skips the loop and returns the starting pair
         let v_zero = I256::ZERO;
         let (rho, tau) = curve25519_heea_vartime(v_zero);

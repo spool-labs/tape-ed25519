@@ -2,20 +2,15 @@
 
 // Vendored from curve25519-dalek, BSD-3-Clause
 
-#![allow(unused_qualifications)]
-
 use alloc::vec;
 
-use subtle::Choice;
-use subtle::ConditionallyNegatable;
-use subtle::ConditionallySelectable;
-use subtle::ConstantTimeEq;
+use subtle::{Choice, ConditionallyNegatable, ConditionallySelectable, ConstantTimeEq};
 
-use crate::backend;
+use crate::backend::serial::u64::field::FieldElement51;
 use crate::constants;
 
 /// An element of the field of integers mod 2^255 - 19, on the 64-bit serial backend
-pub type FieldElement = backend::serial::u64::field::FieldElement51;
+pub type FieldElement = FieldElement51;
 
 impl Eq for FieldElement {}
 
@@ -39,7 +34,7 @@ impl Default for FieldElement {
 }
 
 impl FieldElement {
-    /// Return true when the low bit of the canonical encoding is set, which Ed25519 calls negative
+    /// Return the Ed25519 sign, the low bit of the canonical encoding
     pub fn is_negative(&self) -> Choice {
         let bytes = self.to_bytes();
         (bytes[0] & 1).into()
@@ -83,8 +78,7 @@ impl FieldElement {
 
     /// Replace each public element with its inverse, leaving zeros unchanged
     pub fn invert_batch_alloc(inputs: &mut [FieldElement]) {
-        let n = inputs.len();
-        let mut scratch = vec![FieldElement::ONE; n];
+        let mut scratch = vec![FieldElement::ONE; inputs.len()];
 
         Self::internal_invert_batch(inputs, &mut scratch);
     }
@@ -93,29 +87,26 @@ impl FieldElement {
     fn internal_invert_batch(inputs: &mut [FieldElement], scratch: &mut [FieldElement]) {
         debug_assert_eq!(inputs.len(), scratch.len());
 
-        let mut acc = FieldElement::ONE;
+        let mut accumulator = FieldElement::ONE;
 
         // Each scratch slot keeps the product of every earlier input
         for (input, scratch) in inputs.iter().zip(scratch.iter_mut()) {
-            *scratch = acc;
+            *scratch = accumulator;
             // Zeros are skipped in constant time so one zero cannot spoil the others
-            #[allow(unused_mut)]
-            let mut product = &acc * input;
-            acc.conditional_assign(&product, !input.is_zero());
+            let product = &accumulator * input;
+            accumulator.conditional_assign(&product, !input.is_zero());
         }
 
-        assert!(bool::from(!acc.is_zero()));
+        debug_assert!(bool::from(!accumulator.is_zero()));
 
-        acc = acc.invert();
+        accumulator = accumulator.invert();
 
         for (input, scratch) in inputs.iter_mut().rev().zip(scratch.iter_mut().rev()) {
-            #[allow(unused_mut)]
-            let mut tmp = &acc * input;
-            #[allow(unused_mut)]
-            let mut inverse = &acc * scratch;
-            let nz = !input.is_zero();
-            input.conditional_assign(&inverse, nz);
-            acc.conditional_assign(&tmp, nz);
+            let next_accumulator = &accumulator * input;
+            let inverse = &accumulator * scratch;
+            let is_nonzero = !input.is_zero();
+            input.conditional_assign(&inverse, is_nonzero);
+            accumulator.conditional_assign(&next_accumulator, is_nonzero);
         }
     }
 
@@ -175,8 +166,8 @@ impl FieldElement {
 }
 
 #[cfg(test)]
-mod test {
-    use crate::field::*;
+mod tests {
+    use super::*;
 
     /// A random field element
     static A_BYTES: [u8; 32] = [
@@ -186,77 +177,83 @@ mod test {
     ];
 
     /// The encoding of a^2
-    static ASQ_BYTES: [u8; 32] = [
+    static A_SQUARED_BYTES: [u8; 32] = [
         0x75, 0x97, 0x24, 0x9e, 0xe6, 0x06, 0xfe, 0xab, 0x24, 0x04, 0x56, 0x68, 0x07, 0x91, 0x2d,
         0x5d, 0x0b, 0x0f, 0x3f, 0x1c, 0xb2, 0x6e, 0xf2, 0xe2, 0x63, 0x9c, 0x12, 0xba, 0x73, 0x0b,
         0xe3, 0x62,
     ];
 
     /// The encoding of 1/a
-    static AINV_BYTES: [u8; 32] = [
+    static A_INVERSE_BYTES: [u8; 32] = [
         0x96, 0x1b, 0xcd, 0x8d, 0x4d, 0x5e, 0xa2, 0x3a, 0xe9, 0x36, 0x37, 0x93, 0xdb, 0x7b, 0x4d,
         0x70, 0xb8, 0x0d, 0xc0, 0x55, 0xd0, 0x4c, 0x1d, 0x7b, 0x90, 0x71, 0xd8, 0xe9, 0xb6, 0x18,
         0xe6, 0x30,
     ];
 
     /// The encoding of a^((p - 5) / 8)
-    static AP58_BYTES: [u8; 32] = [
+    static A_P58_BYTES: [u8; 32] = [
         0x6a, 0x4f, 0x24, 0x89, 0x1f, 0x57, 0x60, 0x36, 0xd0, 0xbe, 0x12, 0x3c, 0x8f, 0xf5, 0xb1,
         0x59, 0xe0, 0xf0, 0xb8, 0x1b, 0x20, 0xd2, 0xb5, 0x1f, 0x15, 0x21, 0xf9, 0xe3, 0xe1, 0x61,
         0x21, 0x55,
     ];
 
+    // multiplying a by itself gives the known square
     #[test]
-    fn a_mul_a_vs_a_squared_constant() {
+    fn multiplication() {
         let a = FieldElement::from_bytes(&A_BYTES);
-        let asq = FieldElement::from_bytes(&ASQ_BYTES);
-        assert_eq!(asq, &a * &a);
+        let a_squared = FieldElement::from_bytes(&A_SQUARED_BYTES);
+        assert_eq!(a_squared, &a * &a);
     }
 
+    // squaring a gives the known square
     #[test]
-    fn a_square_vs_a_squared_constant() {
+    fn square() {
         let a = FieldElement::from_bytes(&A_BYTES);
-        let asq = FieldElement::from_bytes(&ASQ_BYTES);
-        assert_eq!(asq, a.square());
+        let a_squared = FieldElement::from_bytes(&A_SQUARED_BYTES);
+        assert_eq!(a_squared, a.square());
     }
 
+    // square2 gives twice the known square
     #[test]
-    fn a_square2_vs_a_squared_constant() {
+    fn double_square() {
         let a = FieldElement::from_bytes(&A_BYTES);
-        let asq = FieldElement::from_bytes(&ASQ_BYTES);
-        assert_eq!(a.square2(), &asq + &asq);
+        let a_squared = FieldElement::from_bytes(&A_SQUARED_BYTES);
+        assert_eq!(a.square2(), &a_squared + &a_squared);
     }
 
+    // inverting a gives the known inverse, which multiplies back to one
     #[test]
-    fn a_invert_vs_inverse_of_a_constant() {
+    fn inverse() {
         let a = FieldElement::from_bytes(&A_BYTES);
-        let ainv = FieldElement::from_bytes(&AINV_BYTES);
+        let a_inverse = FieldElement::from_bytes(&A_INVERSE_BYTES);
         let should_be_inverse = a.invert();
-        assert_eq!(ainv, should_be_inverse);
+        assert_eq!(a_inverse, should_be_inverse);
         assert_eq!(FieldElement::ONE, &a * &should_be_inverse);
     }
 
+    // batch inversion matches one inversion at a time, zero included
     #[test]
-    fn invert_batch_a_matches_nonbatched() {
+    fn batch_inverse() {
         let a = FieldElement::from_bytes(&A_BYTES);
-        let ap58 = FieldElement::from_bytes(&AP58_BYTES);
-        let asq = FieldElement::from_bytes(&ASQ_BYTES);
-        let ainv = FieldElement::from_bytes(&AINV_BYTES);
-        let a0 = &a - &a;
-        let a2 = &a + &a;
-        let a_list = vec![a, ap58, asq, ainv, a0, a2];
-        let mut ainv_list = a_list.clone();
-        FieldElement::invert_batch_alloc(&mut ainv_list[..]);
-        for i in 0..6 {
-            assert_eq!(a_list[i].invert(), ainv_list[i]);
+        let a_p58 = FieldElement::from_bytes(&A_P58_BYTES);
+        let a_squared = FieldElement::from_bytes(&A_SQUARED_BYTES);
+        let a_inverse = FieldElement::from_bytes(&A_INVERSE_BYTES);
+        let zero = &a - &a;
+        let a_doubled = &a + &a;
+        let elements = vec![a, a_p58, a_squared, a_inverse, zero, a_doubled];
+        let mut inverses = elements.clone();
+        FieldElement::invert_batch_alloc(&mut inverses[..]);
+        for (element, inverse) in elements.iter().zip(&inverses) {
+            assert_eq!(element.invert(), *inverse);
         }
     }
 
+    // sqrt_ratio_i returns the right root and flag for zero, square and nonsquare ratios
     #[test]
-    fn sqrt_ratio_behavior() {
+    fn sqrt_ratio() {
         let zero = FieldElement::ZERO;
         let one = FieldElement::ONE;
-        let i = constants::SQRT_M1;
+        let sqrt_minus_one = constants::SQRT_M1;
         let two = &one + &one;
         let four = &two + &two;
 
@@ -275,7 +272,7 @@ mod test {
         // Two is not a square mod p, so the result is sqrt(2i)
         let (choice, sqrt) = FieldElement::sqrt_ratio_i(&two, &one);
         assert!(bool::from(!choice));
-        assert_eq!(sqrt.square(), &two * &i);
+        assert_eq!(sqrt.square(), &two * &sqrt_minus_one);
         assert!(bool::from(!sqrt.is_negative()));
 
         // Four is a square mod p
@@ -291,51 +288,56 @@ mod test {
         assert!(bool::from(!sqrt.is_negative()));
     }
 
+    // raising a to (p - 5) / 8 gives the known power
     #[test]
-    fn a_p58_vs_ap58_constant() {
+    fn pow_p58() {
         let a = FieldElement::from_bytes(&A_BYTES);
-        let ap58 = FieldElement::from_bytes(&AP58_BYTES);
-        assert_eq!(ap58, a.pow_p58());
+        let a_p58 = FieldElement::from_bytes(&A_P58_BYTES);
+        assert_eq!(a_p58, a.pow_p58());
     }
 
+    // an element equals itself and differs from its inverse
     #[test]
     fn equality() {
         let a = FieldElement::from_bytes(&A_BYTES);
-        let ainv = FieldElement::from_bytes(&AINV_BYTES);
+        let a_inverse = FieldElement::from_bytes(&A_INVERSE_BYTES);
         assert!(a == a);
-        assert!(a != ainv);
+        assert!(a != a_inverse);
     }
 
-    /// Bytes with the top bit set, which decoding ignores
+    /// Bytes with the top bit set
     static B_BYTES: [u8; 32] = [
         113, 191, 169, 143, 91, 234, 121, 15, 241, 131, 217, 36, 230, 101, 92, 234, 8, 208, 170,
         251, 97, 127, 70, 210, 58, 23, 166, 87, 240, 169, 184, 178,
     ];
 
+    // decoding ignores the top bit
     #[test]
-    fn from_bytes_highbit_is_ignored() {
+    fn high_bit() {
         let mut cleared_bytes = B_BYTES;
         cleared_bytes[31] &= 127u8;
-        let with_highbit_set = FieldElement::from_bytes(&B_BYTES);
-        let without_highbit_set = FieldElement::from_bytes(&cleared_bytes);
-        assert_eq!(without_highbit_set, with_highbit_set);
+        let with_high_bit_set = FieldElement::from_bytes(&B_BYTES);
+        let without_high_bit_set = FieldElement::from_bytes(&cleared_bytes);
+        assert_eq!(without_high_bit_set, with_high_bit_set);
     }
 
+    // conditional negation flips the sign only when the choice is set
     #[test]
     fn conditional_negate() {
         let one = FieldElement::ONE;
         let minus_one = FieldElement::MINUS_ONE;
-        let mut x = one;
-        x.conditional_negate(Choice::from(1));
-        assert_eq!(x, minus_one);
-        x.conditional_negate(Choice::from(0));
-        assert_eq!(x, minus_one);
-        x.conditional_negate(Choice::from(1));
-        assert_eq!(x, one);
+        let mut element = one;
+        element.conditional_negate(Choice::from(1));
+        assert_eq!(element, minus_one);
+        element.conditional_negate(Choice::from(0));
+        assert_eq!(element, minus_one);
+        element.conditional_negate(Choice::from(1));
+        assert_eq!(element, one);
     }
 
+    // a non-canonical encoding of one encodes back canonically
     #[test]
-    fn encoding_is_canonical() {
+    fn canonical_encoding() {
         // One plus p encodes one non-canonically
         let one_encoded_wrongly_bytes: [u8; 32] = [
             0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -350,8 +352,9 @@ mod test {
         }
     }
 
+    // batch inversion accepts an empty slice
     #[test]
-    fn invert_batch_empty() {
+    fn empty_batch() {
         FieldElement::invert_batch_alloc(&mut []);
     }
 }

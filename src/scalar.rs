@@ -184,14 +184,14 @@ impl Index<usize> for Scalar {
     type Output = u8;
 
     /// Read one byte of the encoding
-    fn index(&self, _index: usize) -> &u8 {
-        &(self.bytes[_index])
+    fn index(&self, index: usize) -> &u8 {
+        &(self.bytes[index])
     }
 }
 
 impl MulAssign<&Scalar> for Scalar {
-    fn mul_assign(&mut self, _rhs: &Scalar) {
-        *self = UnpackedScalar::mul(&self.unpack(), &_rhs.unpack()).pack();
+    fn mul_assign(&mut self, rhs: &Scalar) {
+        *self = UnpackedScalar::mul(&self.unpack(), &rhs.unpack()).pack();
     }
 }
 
@@ -199,16 +199,16 @@ define_mul_assign_variants!(LHS = Scalar, RHS = Scalar);
 
 impl Mul<&Scalar> for &Scalar {
     type Output = Scalar;
-    fn mul(self, _rhs: &Scalar) -> Scalar {
-        UnpackedScalar::mul(&self.unpack(), &_rhs.unpack()).pack()
+    fn mul(self, rhs: &Scalar) -> Scalar {
+        UnpackedScalar::mul(&self.unpack(), &rhs.unpack()).pack()
     }
 }
 
 define_mul_variants!(LHS = Scalar, RHS = Scalar, Output = Scalar);
 
 impl AddAssign<&Scalar> for Scalar {
-    fn add_assign(&mut self, _rhs: &Scalar) {
-        *self = *self + _rhs;
+    fn add_assign(&mut self, rhs: &Scalar) {
+        *self = *self + rhs;
     }
 }
 
@@ -216,17 +216,16 @@ define_add_assign_variants!(LHS = Scalar, RHS = Scalar);
 
 impl Add<&Scalar> for &Scalar {
     type Output = Scalar;
-    #[allow(non_snake_case)]
-    fn add(self, _rhs: &Scalar) -> Scalar {
-        UnpackedScalar::add(&self.unpack(), &_rhs.unpack()).pack()
+    fn add(self, rhs: &Scalar) -> Scalar {
+        UnpackedScalar::add(&self.unpack(), &rhs.unpack()).pack()
     }
 }
 
 define_add_variants!(LHS = Scalar, RHS = Scalar, Output = Scalar);
 
 impl SubAssign<&Scalar> for Scalar {
-    fn sub_assign(&mut self, _rhs: &Scalar) {
-        *self = *self - _rhs;
+    fn sub_assign(&mut self, rhs: &Scalar) {
+        *self = *self - rhs;
     }
 }
 
@@ -234,7 +233,6 @@ define_sub_assign_variants!(LHS = Scalar, RHS = Scalar);
 
 impl Sub<&Scalar> for &Scalar {
     type Output = Scalar;
-    #[allow(non_snake_case)]
     fn sub(self, rhs: &Scalar) -> Scalar {
         UnpackedScalar::sub(&self.unpack(), &rhs.unpack()).pack()
     }
@@ -246,12 +244,9 @@ impl Neg for &Scalar {
     type Output = Scalar;
     #[allow(non_snake_case)]
     fn neg(self) -> Scalar {
-        #[allow(unused_mut)]
-        let mut self_unpacked = self.unpack();
-        #[allow(unused_mut)]
-        let mut self_R = UnpackedScalar::mul_internal(&self_unpacked, &constants::R);
-        #[allow(unused_mut)]
-        let mut self_mod_l = UnpackedScalar::montgomery_reduce(&self_R);
+        let self_unpacked = self.unpack();
+        let self_R = UnpackedScalar::mul_internal(&self_unpacked, &constants::R);
+        let self_mod_l = UnpackedScalar::montgomery_reduce(&self_R);
 
         UnpackedScalar::sub(&UnpackedScalar::ZERO, &self_mod_l).pack()
     }
@@ -306,77 +301,77 @@ impl Default for Scalar {
 }
 
 impl From<u8> for Scalar {
-    fn from(x: u8) -> Scalar {
-        let mut s_bytes = [0u8; 32];
-        s_bytes[0] = x;
-        Scalar { bytes: s_bytes }
+    fn from(value: u8) -> Scalar {
+        let mut bytes = [0u8; 32];
+        bytes[0] = value;
+        Scalar { bytes }
     }
 }
 
 impl From<u16> for Scalar {
-    fn from(x: u16) -> Scalar {
-        let mut s_bytes = [0u8; 32];
-        let x_bytes = x.to_le_bytes();
-        s_bytes[0..x_bytes.len()].copy_from_slice(&x_bytes);
-        Scalar { bytes: s_bytes }
+    fn from(value: u16) -> Scalar {
+        let mut bytes = [0u8; 32];
+        let value_bytes = value.to_le_bytes();
+        bytes[0..value_bytes.len()].copy_from_slice(&value_bytes);
+        Scalar { bytes }
     }
 }
 
 impl From<u32> for Scalar {
-    fn from(x: u32) -> Scalar {
-        let mut s_bytes = [0u8; 32];
-        let x_bytes = x.to_le_bytes();
-        s_bytes[0..x_bytes.len()].copy_from_slice(&x_bytes);
-        Scalar { bytes: s_bytes }
+    fn from(value: u32) -> Scalar {
+        let mut bytes = [0u8; 32];
+        let value_bytes = value.to_le_bytes();
+        bytes[0..value_bytes.len()].copy_from_slice(&value_bytes);
+        Scalar { bytes }
     }
 }
 
 impl From<u64> for Scalar {
-    fn from(x: u64) -> Scalar {
-        let mut s_bytes = [0u8; 32];
-        let x_bytes = x.to_le_bytes();
-        s_bytes[0..x_bytes.len()].copy_from_slice(&x_bytes);
-        Scalar { bytes: s_bytes }
+    fn from(value: u64) -> Scalar {
+        let mut bytes = [0u8; 32];
+        let value_bytes = value.to_le_bytes();
+        bytes[0..value_bytes.len()].copy_from_slice(&value_bytes);
+        Scalar { bytes }
     }
 }
 
 impl From<u128> for Scalar {
-    fn from(x: u128) -> Scalar {
-        let mut s_bytes = [0u8; 32];
-        let x_bytes = x.to_le_bytes();
-        s_bytes[0..x_bytes.len()].copy_from_slice(&x_bytes);
-        Scalar { bytes: s_bytes }
+    fn from(value: u128) -> Scalar {
+        let mut bytes = [0u8; 32];
+        let value_bytes = value.to_le_bytes();
+        bytes[0..value_bytes.len()].copy_from_slice(&value_bytes);
+        Scalar { bytes }
     }
 }
 
 impl From<&Scalar> for I256 {
-    fn from(s: &Scalar) -> I256 {
-        I256::from_le_bytes(s.to_bytes())
+    fn from(scalar: &Scalar) -> I256 {
+        I256::from_le_bytes(scalar.to_bytes())
     }
 }
 
 impl HEEADecomposition for Scalar {
     /// Split the challenge into half-size `rho` and `tau` with `rho = tau h` when the flag is false and `rho = -tau h` when true
     fn heea_decompose(&self) -> (Scalar, Scalar, bool) {
-        let v = self.into();
+        let challenge = self.into();
 
-        let (mut rho_i, mut tau_i) = curve25519_heea_vartime_lehmer(v);
+        let (mut rho_i, mut tau_i) = curve25519_heea_vartime_lehmer(challenge);
 
         // Both values go back as magnitudes and each negative sign flips h once
-        let mut flip_h = false;
+        let mut is_flipped = false;
         if rho_i < I256::ZERO {
             rho_i = -rho_i;
-            flip_h = !flip_h;
+            is_flipped = !is_flipped;
         }
         if tau_i < I256::ZERO {
             tau_i = -tau_i;
-            flip_h = !flip_h;
+            is_flipped = !is_flipped;
         }
 
         let rho = Scalar::from_positive_i256(&rho_i);
         let tau = Scalar::from_positive_i256(&tau_i);
 
-        (rho, tau, flip_h)
+        (rho, tau, is_flipped)
     }
 }
 
@@ -404,10 +399,8 @@ impl Scalar {
 
     /// Compute the multiplicative inverse of a nonzero scalar
     pub fn invert(&self) -> Scalar {
-        #[allow(unused_mut)]
-        let mut unpacked = self.unpack();
-        #[allow(unused_mut)]
-        let mut inverse = unpacked.invert();
+        let unpacked = self.unpack();
+        let inverse = unpacked.invert();
 
         inverse.pack()
     }
@@ -423,10 +416,9 @@ impl Scalar {
 
     /// Invert a slice of nonzero scalars in place and return the inverse of their product
     pub fn invert_batch_alloc(inputs: &mut [Scalar]) -> Scalar {
-        let n = inputs.len();
         let one: UnpackedScalar = Scalar::ONE.unpack().as_montgomery();
 
-        let mut scratch = vec![one; n];
+        let mut scratch = vec![one; inputs.len()];
 
         Self::invert_batch_internal(inputs, &mut scratch)
     }
@@ -447,7 +439,7 @@ impl Scalar {
 
         acc = acc.montgomery_invert().from_montgomery();
 
-        let ret = acc.pack();
+        let product_inverse = acc.pack();
 
         for (input, scratch) in inputs.iter_mut().rev().zip(scratch.iter().rev()) {
             let tmp = UnpackedScalar::montgomery_mul(&acc, &input.unpack());
@@ -455,7 +447,7 @@ impl Scalar {
             acc = tmp;
         }
 
-        ret
+        product_inverse
     }
 
     /// Compute `b` with `b + b = a mod l`
@@ -669,22 +661,19 @@ impl Scalar {
     }
 
     /// Convert a non-negative `I256` to a scalar
-    pub fn from_positive_i256(val: &I256) -> Self {
-        debug_assert!(val >= &I256::ZERO);
+    pub fn from_positive_i256(value: &I256) -> Self {
+        debug_assert!(value >= &I256::ZERO);
         Scalar {
-            bytes: val.to_le_bytes(),
+            bytes: value.to_le_bytes(),
         }
     }
 
     /// Reduce the scalar modulo l
     #[allow(non_snake_case)]
     fn reduce(&self) -> Scalar {
-        #[allow(unused_mut)]
-        let mut x = self.unpack();
-        #[allow(unused_mut)]
-        let mut xR = UnpackedScalar::mul_internal(&x, &constants::R);
-        #[allow(unused_mut)]
-        let mut x_mod_l = UnpackedScalar::montgomery_reduce(&xR);
+        let x = self.unpack();
+        let xR = UnpackedScalar::mul_internal(&x, &constants::R);
+        let x_mod_l = UnpackedScalar::montgomery_reduce(&xR);
 
         x_mod_l.pack()
     }
@@ -761,10 +750,8 @@ impl UnpackedScalar {
 
     /// Invert a scalar in plain form
     pub fn invert(&self) -> UnpackedScalar {
-        #[allow(unused_mut)]
-        let mut montgomery = self.as_montgomery();
-        #[allow(unused_mut)]
-        let mut inverse = montgomery.montgomery_invert();
+        let montgomery = self.as_montgomery();
+        let inverse = montgomery.montgomery_invert();
 
         inverse.from_montgomery()
     }
@@ -789,30 +776,31 @@ pub const fn clamp_integer(mut bytes: [u8; 32]) -> [u8; 32] {
 }
 
 #[cfg(test)]
-pub mod test {
-    use super::*;
-
+pub mod tests {
     use alloc::vec::Vec;
+
     use rand::Rng;
 
-    /// x = 2238329342913194256032495932344128051776374960164957527413114840482143558222
-    pub static X: Scalar = Scalar {
+    use super::*;
+
+    /// The value 2238329342913194256032495932344128051776374960164957527413114840482143558222
+    static FIRST: Scalar = Scalar {
         bytes: [
             0x4e, 0x5a, 0xb4, 0x34, 0x5d, 0x47, 0x08, 0x84, 0x59, 0x13, 0xb4, 0x64, 0x1b, 0xc2,
             0x7d, 0x52, 0x52, 0xa5, 0x85, 0x10, 0x1b, 0xcc, 0x42, 0x44, 0xd4, 0x49, 0xf4, 0xa8,
             0x79, 0xd9, 0xf2, 0x04,
         ],
     };
-    /// 1/x = 6859937278830797291664592131120606308688036382723378951768035303146619657244
-    pub static XINV: Scalar = Scalar {
+    /// The inverse of the first test scalar
+    static FIRST_INVERSE: Scalar = Scalar {
         bytes: [
             0x1c, 0xdc, 0x17, 0xfc, 0xe0, 0xe9, 0xa5, 0xbb, 0xd9, 0x24, 0x7e, 0x56, 0xbb, 0x01,
             0x63, 0x47, 0xbb, 0xba, 0x31, 0xed, 0xd5, 0xa9, 0xbb, 0x96, 0xd5, 0x0b, 0xcd, 0x7a,
             0x3f, 0x96, 0x2a, 0x0f,
         ],
     };
-    /// y = 2592331292931086675770238855846338635550719849568364935475441891787804997264
-    pub static Y: Scalar = Scalar {
+    /// The value 2592331292931086675770238855846338635550719849568364935475441891787804997264
+    static SECOND: Scalar = Scalar {
         bytes: [
             0x90, 0x76, 0x33, 0xfe, 0x1c, 0x4b, 0x66, 0xa4, 0xa2, 0x8d, 0x2d, 0xd7, 0x67, 0x83,
             0x86, 0xc3, 0x53, 0xd0, 0xde, 0x54, 0x55, 0xd4, 0xfc, 0x9d, 0xe8, 0xef, 0x7a, 0xc3,
@@ -829,8 +817,8 @@ pub mod test {
         ],
     };
 
-    /// x*y = 5690045403673944803228348699031245560686958845067437804563560795922180092780
-    static X_TIMES_Y: Scalar = Scalar {
+    /// The product of the two test scalars mod l
+    static FIRST_TIMES_SECOND: Scalar = Scalar {
         bytes: [
             0x6c, 0x33, 0x74, 0xa1, 0x89, 0x4f, 0x62, 0x21, 0x0a, 0xaa, 0x2f, 0xe1, 0x86, 0xa6,
             0xf9, 0x2c, 0xe0, 0xaa, 0x75, 0xc2, 0x77, 0x95, 0x81, 0xc2, 0x95, 0xfc, 0x08, 0x17,
@@ -846,6 +834,7 @@ pub mod test {
         ],
     };
 
+    /// A fixed test scalar
     static A_SCALAR: Scalar = Scalar {
         bytes: [
             0x1a, 0x0e, 0x97, 0x8a, 0x90, 0xf6, 0x62, 0x2d, 0x37, 0x47, 0x02, 0x3f, 0x8a, 0xd8,
@@ -854,7 +843,8 @@ pub mod test {
         ],
     };
 
-    static A_NAF: [i8; 256] = [
+    /// The width-5 non-adjacent form of the A test scalar
+    static A_NONADJACENT_FORM: [i8; 256] = [
         0, 13, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, -9, 0, 0, 0, 0, -11, 0, 0, 0, 0, 3, 0, 0,
         0, 0, 1, 0, 0, 0, 0, 9, 0, 0, 0, 0, -5, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 11, 0, 0, 0, 0,
         11, 0, 0, 0, 0, 0, -9, 0, 0, 0, 0, 0, -3, 0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0,
@@ -866,6 +856,7 @@ pub mod test {
         0, 0, 0, 0, 15, 0, 0, 0, 0, 15, 0, 0, 0, 0, 15, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
     ];
 
+    /// The largest scalar below l
     const BASEPOINT_ORDER_MINUS_ONE: Scalar = Scalar {
         bytes: [
             0xec, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9,
@@ -874,56 +865,76 @@ pub mod test {
         ],
     };
 
-    /// The largest clamped integer
+    /// The largest clamped value
     static LARGEST_CLAMPED_INTEGER: [u8; 32] = clamp_integer(LARGEST_UNREDUCED_SCALAR.bytes);
 
+    fn check_radix_digits(scalar: Scalar, width: usize) {
+        let digits_count = Scalar::to_radix_2w_size_hint(width);
+        let digits = scalar.as_radix_2w(width);
+
+        let radix = Scalar::from((1 << width) as u64);
+        let mut term = Scalar::ONE;
+        let mut recovered_scalar = Scalar::ZERO;
+        for digit in &digits[0..digits_count] {
+            let digit = *digit;
+            if digit != 0 {
+                let signed_digit = match digit < 0 {
+                    true => -Scalar::from((-(digit as i64)) as u64),
+                    false => Scalar::from(digit as u64),
+                };
+                recovered_scalar += term * signed_digit;
+            }
+            term *= radix;
+        }
+        // An unreduced input comes back only mod l
+        assert_eq!(recovered_scalar, scalar.reduce());
+    }
+
+    // a product the fuzzer found reduces the same through both reductions
     #[test]
-    fn fuzzer_testcase_reduction() {
+    fn fuzzer_reduction() {
         // Little-endian bytes of 24519928653854221733733552434404946937899825954937634815
-        let a_bytes = [
+        let first_bytes = [
             255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
             255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
         // Little-endian bytes of 4975441334397345751130612518500927154628011511324180036903450236863266160640
-        let b_bytes = [
+        let second_bytes = [
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 210, 210,
             210, 255, 255, 255, 255, 10,
         ];
         // Little-endian bytes of 6432735165214683820902750800207468552549813371247423777071615116673864412038
-        let c_bytes = [
+        let product_bytes = [
             134, 171, 119, 216, 180, 128, 178, 62, 171, 132, 32, 62, 34, 119, 104, 193, 47, 215,
             181, 250, 14, 207, 172, 93, 75, 207, 211, 103, 144, 204, 56, 14,
         ];
 
-        let a = Scalar::from_bytes_mod_order(a_bytes);
-        let b = Scalar::from_bytes_mod_order(b_bytes);
-        let c = Scalar::from_bytes_mod_order(c_bytes);
+        let first = Scalar::from_bytes_mod_order(first_bytes);
+        let second = Scalar::from_bytes_mod_order(second_bytes);
+        let product = Scalar::from_bytes_mod_order(product_bytes);
 
-        let mut tmp = [0u8; 64];
+        let mut wide = [0u8; 64];
+        wide[0..32].copy_from_slice(&first_bytes[..]);
+        let wide_first = Scalar::from_bytes_mod_order_wide(&wide);
+        wide[0..32].copy_from_slice(&second_bytes[..]);
+        let wide_second = Scalar::from_bytes_mod_order_wide(&wide);
 
-        tmp[0..32].copy_from_slice(&a_bytes[..]);
-        let also_a = Scalar::from_bytes_mod_order_wide(&tmp);
-
-        tmp[0..32].copy_from_slice(&b_bytes[..]);
-        let also_b = Scalar::from_bytes_mod_order_wide(&tmp);
-
-        let expected_c = a * b;
-        let also_expected_c = also_a * also_b;
-
-        assert_eq!(c, expected_c);
-        assert_eq!(c, also_expected_c);
+        assert_eq!(product, first * second);
+        assert_eq!(product, wide_first * wide_second);
     }
 
+    // the width-5 form of a known scalar matches the reference digits
     #[test]
-    fn non_adjacent_form_test_vector() {
-        let naf = A_SCALAR.non_adjacent_form(5);
-        for i in 0..256 {
-            assert_eq!(naf[i], A_NAF[i]);
+    fn nonadjacent_form() {
+        let digits = A_SCALAR.non_adjacent_form(5);
+        for index in 0..256 {
+            assert_eq!(digits[index], A_NONADJACENT_FORM[index]);
         }
     }
 
+    // the 128-bit form matches the full form at every width
     #[test]
-    fn non_adjacent_form_128_matches_generic() {
+    fn nonadjacent_narrow() {
         let mut high_bit = [0u8; 32];
         high_bit[15] = 0x80;
 
@@ -937,148 +948,156 @@ pub mod test {
         ];
 
         for scalar in cases {
-            for w in 2..=8 {
-                let generic = scalar.non_adjacent_form(w);
-                let naf_128 = scalar.non_adjacent_form_128(w);
+            for width in 2..=8 {
+                let full = scalar.non_adjacent_form(width);
+                let narrow = scalar.non_adjacent_form_128(width);
 
-                for i in 0..=HEEA_MAX_INDEX {
+                for index in 0..=HEEA_MAX_INDEX {
                     assert_eq!(
-                        naf_128[i], generic[i],
-                        "NAF mismatch at index {i} for width {w}"
+                        narrow[index], full[index],
+                        "digit {index} differs at width {width}"
                     );
                 }
 
                 assert!(
-                    generic[NAF_128_SIZE..].iter().all(|&digit| digit == 0),
-                    "generic NAF has non-zero digits above 128-bit range for width {w}"
+                    full[NAF_128_SIZE..].iter().all(|&digit| digit == 0),
+                    "the full form has digits above bit 128 at width {width}"
                 );
             }
         }
     }
 
+    // a u64 lands in the low eight bytes in little-endian order
     #[test]
-    fn from_u64() {
-        let val: u64 = 0xdeadbeefdeadbeef;
-        let s = Scalar::from(val);
-        assert_eq!(s[7], 0xde);
-        assert_eq!(s[6], 0xad);
-        assert_eq!(s[5], 0xbe);
-        assert_eq!(s[4], 0xef);
-        assert_eq!(s[3], 0xde);
-        assert_eq!(s[2], 0xad);
-        assert_eq!(s[1], 0xbe);
-        assert_eq!(s[0], 0xef);
+    fn from_word() {
+        let value: u64 = 0xdeadbeefdeadbeef;
+        let scalar = Scalar::from(value);
+        assert_eq!(scalar[7], 0xde);
+        assert_eq!(scalar[6], 0xad);
+        assert_eq!(scalar[5], 0xbe);
+        assert_eq!(scalar[4], 0xef);
+        assert_eq!(scalar[3], 0xde);
+        assert_eq!(scalar[2], 0xad);
+        assert_eq!(scalar[1], 0xbe);
+        assert_eq!(scalar[0], 0xef);
     }
 
+    // multiplying by one leaves every byte alone
     #[test]
-    fn scalar_mul_by_one() {
-        let test_scalar = X * Scalar::ONE;
-        for i in 0..32 {
-            assert!(test_scalar[i] == X[i]);
+    fn multiply_one() {
+        let product = FIRST * Scalar::ONE;
+        for index in 0..32 {
+            assert!(product[index] == FIRST[index]);
         }
     }
 
+    // addition wraps around the group order
     #[test]
-    fn add_reduces() {
+    fn add_wraps() {
         assert_eq!(BASEPOINT_ORDER_MINUS_ONE + Scalar::ONE, Scalar::ZERO);
     }
 
+    // subtraction wraps around the group order
     #[test]
-    fn sub_reduces() {
+    fn subtract_wraps() {
         assert_eq!(Scalar::ZERO - Scalar::ONE, BASEPOINT_ORDER_MINUS_ONE);
     }
 
+    // one plus one is two
     #[test]
-    fn impl_add() {
+    fn addition() {
         let two = Scalar::from(2u64);
         let one = Scalar::ONE;
-        let should_be_two = one + one;
-        assert_eq!(should_be_two, two);
+        assert_eq!(one + one, two);
     }
 
-    #[allow(non_snake_case)]
+    // the product of the two test scalars matches the reference value
     #[test]
-    fn impl_mul() {
-        let should_be_X_times_Y = X * Y;
-        assert_eq!(should_be_X_times_Y, X_TIMES_Y);
+    fn multiplication() {
+        assert_eq!(FIRST * SECOND, FIRST_TIMES_SECOND);
     }
 
-    #[allow(non_snake_case)]
+    // the product iterator handles borrowed, empty and owned inputs
     #[test]
-    fn impl_product() {
-        let X_Y_vector = [X, Y];
-        let should_be_X_times_Y: Scalar = X_Y_vector.iter().product();
-        assert_eq!(should_be_X_times_Y, X_TIMES_Y);
+    fn product() {
+        let pair = [FIRST, SECOND];
+        let pair_product: Scalar = pair.iter().product();
+        assert_eq!(pair_product, FIRST_TIMES_SECOND);
 
-        let one = Scalar::ONE;
-        let empty_vector = [];
-        let should_be_one: Scalar = empty_vector.iter().product();
-        assert_eq!(should_be_one, one);
+        let empty: [Scalar; 0] = [];
+        let empty_product: Scalar = empty.iter().product();
+        assert_eq!(empty_product, Scalar::ONE);
 
-        let xs = [Scalar::from(2u64); 10];
-        let ys = [Scalar::from(3u64); 10];
-        let zs = xs.iter().zip(ys.iter()).map(|(x, y)| x * y);
+        let twos = [Scalar::from(2u64); 10];
+        let threes = [Scalar::from(3u64); 10];
+        let sixes = twos
+            .iter()
+            .zip(threes.iter())
+            .map(|(two, three)| two * three);
 
-        let x_prod: Scalar = xs.iter().product();
-        let y_prod: Scalar = ys.iter().product();
-        let z_prod: Scalar = zs.product();
+        let twos_product: Scalar = twos.iter().product();
+        let threes_product: Scalar = threes.iter().product();
+        let sixes_product: Scalar = sixes.product();
 
-        assert_eq!(x_prod, Scalar::from(1024u64));
-        assert_eq!(y_prod, Scalar::from(59049u64));
-        assert_eq!(z_prod, Scalar::from(60466176u64));
-        assert_eq!(x_prod * y_prod, z_prod);
+        assert_eq!(twos_product, Scalar::from(1024u64));
+        assert_eq!(threes_product, Scalar::from(59049u64));
+        assert_eq!(sixes_product, Scalar::from(60466176u64));
+        assert_eq!(twos_product * threes_product, sixes_product);
     }
 
+    // the sum iterator handles borrowed, empty and owned inputs
     #[test]
-    fn impl_sum() {
+    fn sum() {
         let two = Scalar::from(2u64);
-        let one_vector = [Scalar::ONE, Scalar::ONE];
-        let should_be_two: Scalar = one_vector.iter().sum();
-        assert_eq!(should_be_two, two);
+        let ones = [Scalar::ONE, Scalar::ONE];
+        let ones_sum: Scalar = ones.iter().sum();
+        assert_eq!(ones_sum, two);
 
-        let zero = Scalar::ZERO;
-        let empty_vector = [];
-        let should_be_zero: Scalar = empty_vector.iter().sum();
-        assert_eq!(should_be_zero, zero);
+        let empty: [Scalar; 0] = [];
+        let empty_sum: Scalar = empty.iter().sum();
+        assert_eq!(empty_sum, Scalar::ZERO);
 
-        let xs = [Scalar::from(1u64); 10];
-        let ys = [Scalar::from(2u64); 10];
-        let zs = xs.iter().zip(ys.iter()).map(|(x, y)| x + y);
+        let ones = [Scalar::from(1u64); 10];
+        let twos = [Scalar::from(2u64); 10];
+        let threes = ones.iter().zip(twos.iter()).map(|(one, two)| one + two);
 
-        let x_sum: Scalar = xs.iter().sum();
-        let y_sum: Scalar = ys.iter().sum();
-        let z_sum: Scalar = zs.sum();
+        let ones_sum: Scalar = ones.iter().sum();
+        let twos_sum: Scalar = twos.iter().sum();
+        let threes_sum: Scalar = threes.sum();
 
-        assert_eq!(x_sum, Scalar::from(10u64));
-        assert_eq!(y_sum, Scalar::from(20u64));
-        assert_eq!(z_sum, Scalar::from(30u64));
-        assert_eq!(x_sum + y_sum, z_sum);
+        assert_eq!(ones_sum, Scalar::from(10u64));
+        assert_eq!(twos_sum, Scalar::from(20u64));
+        assert_eq!(threes_sum, Scalar::from(30u64));
+        assert_eq!(ones_sum + twos_sum, threes_sum);
     }
 
+    // squaring matches multiplying a scalar by itself
     #[test]
     fn square() {
-        let expected = X * X;
-        let actual = X.unpack().square().pack();
-        for i in 0..32 {
-            assert!(expected[i] == actual[i]);
+        let expected = FIRST * FIRST;
+        let actual = FIRST.unpack().square().pack();
+        for index in 0..32 {
+            assert!(expected[index] == actual[index]);
         }
     }
 
+    // halving then doubling gives the scalar back near zero and near the order
     #[test]
-    fn div_by_2() {
-        for i in 0u64..32 {
-            let scalar = Scalar::from(i);
-            let dividend = scalar.div_by_2();
-            assert_eq!(scalar, dividend + dividend);
+    fn halving() {
+        for value in 0u64..32 {
+            let scalar = Scalar::from(value);
+            let half = scalar.div_by_2();
+            assert_eq!(scalar, half + half);
         }
 
-        for i in 0u64..32 {
-            let scalar = Scalar::ZERO - Scalar::from(i);
-            let dividend = scalar.div_by_2();
-            assert_eq!(scalar, dividend + dividend);
+        for value in 0u64..32 {
+            let scalar = Scalar::ZERO - Scalar::from(value);
+            let half = scalar.div_by_2();
+            assert_eq!(scalar, half + half);
         }
     }
 
+    // the largest 256-bit value reduces to its reference residue
     #[test]
     fn reduce() {
         let biggest = Scalar::from_bytes_mod_order([0xff; 32]);
@@ -1087,48 +1106,53 @@ pub mod test {
 
     // the fold reduction agrees with the Montgomery path at every edge
     #[test]
-    fn wide_reduction_matches_montgomery() {
-        let l = constants::BASEPOINT_ORDER.to_bytes();
+    fn wide_reduction() {
+        let order = constants::BASEPOINT_ORDER.to_bytes();
         let mut vectors: Vec<[u8; 64]> = vec![[0u8; 64], [0xffu8; 64]];
         for shift in [252usize, 253, 255, 256, 260, 300, 400, 511] {
-            let mut v = [0u8; 64];
-            v[shift / 8] = 1 << (shift % 8);
-            vectors.push(v);
+            let mut vector = [0u8; 64];
+            vector[shift / 8] = 1 << (shift % 8);
+            vectors.push(vector);
         }
         for delta in [-2i64, -1, 0, 1, 2] {
-            let mut v = [0u8; 64];
-            v[..32].copy_from_slice(&l);
-            let mut carry = delta;
-            for b in v.iter_mut() {
-                let x = *b as i64 + carry;
-                *b = x.rem_euclid(256) as u8;
-                carry = x.div_euclid(256);
+            let mut vector = [0u8; 64];
+            vector[..32].copy_from_slice(&order);
+            let mut overflow = delta;
+            for byte in vector.iter_mut() {
+                let sum = *byte as i64 + overflow;
+                *byte = sum.rem_euclid(256) as u8;
+                overflow = sum.div_euclid(256);
             }
-            vectors.push(v);
+            vectors.push(vector);
         }
         let mut state = 0x5EED_1EE5_u64;
         for _ in 0..4096 {
-            let mut v = [0u8; 64];
-            for chunk in v.as_chunks_mut::<8>().0 {
+            let mut vector = [0u8; 64];
+            for word in vector.as_chunks_mut::<8>().0 {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                chunk.copy_from_slice(&state.to_le_bytes());
+                word.copy_from_slice(&state.to_le_bytes());
             }
-            vectors.push(v);
+            vectors.push(vector);
         }
-        for v in &vectors {
-            let want = UnpackedScalar::from_bytes_wide(v).pack();
-            assert_eq!(Scalar::from_bytes_mod_order_wide(v), want, "{v:02x?}");
+        for vector in &vectors {
+            let expected = UnpackedScalar::from_bytes_wide(vector).pack();
+            assert_eq!(
+                Scalar::from_bytes_mod_order_wide(vector),
+                expected,
+                "{vector:02x?}"
+            );
         }
     }
 
+    // a 512-bit value reduces to its reference residue
     #[test]
-    fn from_bytes_mod_order_wide() {
-        let mut bignum = [0u8; 64];
-        for i in 0..32 {
-            bignum[i] = X[i];
-            bignum[32 + i] = X[i];
+    fn wide_decode() {
+        let mut wide = [0u8; 64];
+        for index in 0..32 {
+            wide[index] = FIRST[index];
+            wide[32 + index] = FIRST[index];
         }
         // The value x + 2^256 x mod l
         let reduced = Scalar {
@@ -1137,47 +1161,44 @@ pub mod test {
                 91, 50, 219, 153, 57, 249, 28, 82, 31, 197, 100, 165, 192, 8,
             ],
         };
-        let test_red = Scalar::from_bytes_mod_order_wide(&bignum);
-        for i in 0..32 {
-            assert!(test_red[i] == reduced[i]);
+        let decoded = Scalar::from_bytes_mod_order_wide(&wide);
+        for index in 0..32 {
+            assert!(decoded[index] == reduced[index]);
         }
     }
 
-    #[allow(non_snake_case)]
+    // the inverse matches the reference and multiplies back to one
     #[test]
     fn invert() {
-        let inv_X = X.invert();
-        assert_eq!(inv_X, XINV);
-        let should_be_one = inv_X * X;
-        assert_eq!(should_be_one, Scalar::ONE);
+        let inverse = FIRST.invert();
+        assert_eq!(inverse, FIRST_INVERSE);
+        assert_eq!(inverse * FIRST, Scalar::ONE);
     }
 
     // negating a scalar twice gives the scalar back
-    #[allow(non_snake_case)]
     #[test]
-    fn neg_twice_is_identity() {
-        let negative_X = -&X;
-        let should_be_X = -&negative_X;
-
-        assert_eq!(should_be_X, X);
+    fn double_negation() {
+        let negated = -&FIRST;
+        assert_eq!(-&negated, FIRST);
     }
 
+    // packing and unpacking round-trips the limbs
     #[test]
-    fn to_bytes_from_bytes_roundtrips() {
-        let unpacked = X.unpack();
+    fn bytes_roundtrip() {
+        let unpacked = FIRST.unpack();
         let bytes = unpacked.to_bytes();
-        let should_be_unpacked = UnpackedScalar::from_bytes(&bytes);
+        let repacked = UnpackedScalar::from_bytes(&bytes);
 
-        assert_eq!(should_be_unpacked.0, unpacked.0);
+        assert_eq!(repacked.0, unpacked.0);
     }
 
+    // Montgomery reduction of a wide value matches the wide decoder
     #[test]
-    fn montgomery_reduce_matches_from_bytes_mod_order_wide() {
-        let mut bignum = [0u8; 64];
-
-        for i in 0..32 {
-            bignum[i] = X[i];
-            bignum[32 + i] = X[i];
+    fn montgomery_reduce() {
+        let mut wide = [0u8; 64];
+        for index in 0..32 {
+            wide[index] = FIRST[index];
+            wide[32 + index] = FIRST[index];
         }
         // The value x + 2^256 x mod l
         let expected = Scalar {
@@ -1186,18 +1207,18 @@ pub mod test {
                 91, 50, 219, 153, 57, 249, 28, 82, 31, 197, 100, 165, 192, 8,
             ],
         };
-        let reduced = Scalar::from_bytes_mod_order_wide(&bignum);
-
+        let reduced = Scalar::from_bytes_mod_order_wide(&wide);
         assert_eq!(reduced.bytes, expected.bytes);
 
         let interim =
-            UnpackedScalar::mul_internal(&UnpackedScalar::from_bytes_wide(&bignum), &constants::R);
+            UnpackedScalar::mul_internal(&UnpackedScalar::from_bytes_wide(&wide), &constants::R);
         let montgomery_reduced = UnpackedScalar::montgomery_reduce(&interim);
 
         assert_eq!(montgomery_reduced.0, reduced.unpack().0);
         assert_eq!(montgomery_reduced.0, expected.unpack().0)
     }
 
+    // the decoder accepts values below l and refuses the rest
     #[test]
     fn canonical_decoding() {
         // The canonical encoding of 1667457891
@@ -1207,10 +1228,10 @@ pub mod test {
         ];
 
         // Every byte 16 encodes a value at or above l
-        let non_canonical_bytes_because_unreduced = [16; 32];
+        let unreduced_bytes = [16; 32];
 
         // The decoder must refuse a set high bit without masking it off
-        let non_canonical_bytes_because_highbit = [
+        let high_bit_bytes = [
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 128,
         ];
@@ -1219,108 +1240,90 @@ pub mod test {
             Scalar::from_canonical_bytes(canonical_bytes).is_some()
         ));
         assert!(bool::from(
-            Scalar::from_canonical_bytes(non_canonical_bytes_because_unreduced).is_none()
+            Scalar::from_canonical_bytes(unreduced_bytes).is_none()
         ));
         assert!(bool::from(
-            Scalar::from_canonical_bytes(non_canonical_bytes_because_highbit).is_none()
+            Scalar::from_canonical_bytes(high_bit_bytes).is_none()
         ));
     }
 
+    // a zero input trips the debug check in batch inversion
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
-    fn invert_batch_with_a_zero_input_panics() {
-        let mut xs = [Scalar::ONE; 16];
-        xs[3] = Scalar::ZERO;
-        Scalar::invert_batch(&mut xs);
+    fn batch_zero() {
+        let mut scalars = [Scalar::ONE; 16];
+        scalars[3] = Scalar::ZERO;
+        Scalar::invert_batch(&mut scalars);
     }
 
+    // inverting an empty batch returns one
     #[test]
-    fn invert_batch_empty() {
+    fn batch_empty() {
         assert_eq!(Scalar::ONE, Scalar::invert_batch(&mut []));
     }
 
+    // batch inversion inverts every entry and returns the inverse product
     #[test]
-    fn invert_batch_consistency() {
-        let mut x = Scalar::from(1u64);
-        let mut v1: [Scalar; 16] = core::array::from_fn(|_| {
-            let tmp = x;
-            x = x + x;
-            tmp
+    fn batch_inverse() {
+        let mut power = Scalar::from(1u64);
+        let mut inverted: [Scalar; 16] = core::array::from_fn(|_| {
+            let current = power;
+            power = power + power;
+            current
         });
-        let v2 = v1;
+        let originals = inverted;
 
-        let expected: Scalar = v1.iter().product();
-        let expected = expected.invert();
-        let ret = Scalar::invert_batch(&mut v1);
-        assert_eq!(ret, expected);
+        let product: Scalar = inverted.iter().product();
+        let expected = product.invert();
+        let returned = Scalar::invert_batch(&mut inverted);
+        assert_eq!(returned, expected);
 
-        for (a, b) in v1.iter().zip(v2.iter()) {
-            assert_eq!(a * b, Scalar::ONE);
+        for (inverse, original) in inverted.iter().zip(originals.iter()) {
+            assert_eq!(inverse * original, Scalar::ONE);
         }
     }
 
+    // the allocating batch inversion matches the fixed-size one
     #[test]
-    fn batch_vec_invert_consistency() {
-        let mut x = Scalar::from(1u64);
-        let mut v1: Vec<_> = (0..16)
+    fn batch_allocating() {
+        let mut power = Scalar::from(1u64);
+        let mut inverted: Vec<_> = (0..16)
             .map(|_| {
-                let tmp = x;
-                x = x + x;
-                tmp
+                let current = power;
+                power = power + power;
+                current
             })
             .collect();
-        let v2 = v1.clone();
+        let originals = inverted.clone();
 
-        let expected: Scalar = v1.iter().product();
-        let expected = expected.invert();
-        let ret = Scalar::invert_batch_alloc(&mut v1);
-        assert_eq!(ret, expected);
+        let product: Scalar = inverted.iter().product();
+        let expected = product.invert();
+        let returned = Scalar::invert_batch_alloc(&mut inverted);
+        assert_eq!(returned, expected);
 
-        for (a, b) in v1.iter().zip(v2.iter()) {
-            assert_eq!(a * b, Scalar::ONE);
+        for (inverse, original) in inverted.iter().zip(originals.iter()) {
+            assert_eq!(inverse * original, Scalar::ONE);
         }
     }
 
-    fn test_pippenger_radix_iter(scalar: Scalar, w: usize) {
-        let digits_count = Scalar::to_radix_2w_size_hint(w);
-        let digits = scalar.as_radix_2w(w);
-
-        let radix = Scalar::from((1 << w) as u64);
-        let mut term = Scalar::ONE;
-        let mut recovered_scalar = Scalar::ZERO;
-        for digit in &digits[0..digits_count] {
-            let digit = *digit;
-            if digit != 0 {
-                let sdigit = if digit < 0 {
-                    -Scalar::from((-(digit as i64)) as u64)
-                } else {
-                    Scalar::from(digit as u64)
-                };
-                recovered_scalar += term * sdigit;
-            }
-            term *= radix;
-        }
-        // An unreduced input comes back only mod l
-        assert_eq!(recovered_scalar, scalar.reduce());
-    }
-
+    // radix digits at widths 6, 7 and 8 recover the scalar they came from
     #[test]
-    fn test_pippenger_radix() {
-        use core::iter;
+    fn radix_digits() {
         let cases = (2..100)
-            .map(|s| Scalar::from(s as u64).invert())
-            .chain(iter::once(LARGEST_UNREDUCED_SCALAR));
+            .map(|value| Scalar::from(value as u64).invert())
+            .chain(core::iter::once(LARGEST_UNREDUCED_SCALAR));
 
         for scalar in cases {
-            test_pippenger_radix_iter(scalar, 6);
-            test_pippenger_radix_iter(scalar, 7);
-            test_pippenger_radix_iter(scalar, 8);
+            check_radix_digits(scalar, 6);
+            check_radix_digits(scalar, 7);
+            check_radix_digits(scalar, 8);
         }
     }
 
+    // bytes read back as little-endian words
     #[test]
-    fn test_read_le_u64_into() {
+    fn read_words() {
         let cases: &[(&[u8], &[u64])] = &[
             (
                 &[0xFE, 0xEF, 0x10, 0x01, 0x1F, 0xF1, 0x0F, 0xF0],
@@ -1335,42 +1338,38 @@ pub mod test {
             ),
         ];
 
-        for (src, expected) in cases {
-            let mut dst = vec![0; expected.len()];
-            read_le_u64_into(src, &mut dst);
+        for (source, expected) in cases {
+            let mut destination = vec![0; expected.len()];
+            read_le_u64_into(source, &mut destination);
 
-            assert_eq!(&dst, expected, "Expected {:x?} got {:x?}", expected, dst);
+            assert_eq!(&destination, expected);
         }
     }
 
     // every integer conversion agrees with scalar addition
     #[test]
-    fn test_scalar_from_int() {
-        let s1 = Scalar::ONE;
+    fn from_integers() {
+        let one = Scalar::ONE;
 
-        let x = 0x23u8;
-        let sx = Scalar::from(x);
-        assert_eq!(sx + s1, Scalar::from(x + 1));
+        let value = 0x23u8;
+        assert_eq!(Scalar::from(value) + one, Scalar::from(value + 1));
 
-        let x = 0x2323u16;
-        let sx = Scalar::from(x);
-        assert_eq!(sx + s1, Scalar::from(x + 1));
+        let value = 0x2323u16;
+        assert_eq!(Scalar::from(value) + one, Scalar::from(value + 1));
 
-        let x = 0x2323_2323u32;
-        let sx = Scalar::from(x);
-        assert_eq!(sx + s1, Scalar::from(x + 1));
+        let value = 0x2323_2323u32;
+        assert_eq!(Scalar::from(value) + one, Scalar::from(value + 1));
 
-        let x = 0x2323_2323_2323_2323u64;
-        let sx = Scalar::from(x);
-        assert_eq!(sx + s1, Scalar::from(x + 1));
+        let value = 0x2323_2323_2323_2323u64;
+        assert_eq!(Scalar::from(value) + one, Scalar::from(value + 1));
 
-        let x = 0x2323_2323_2323_2323_2323_2323_2323_2323u128;
-        let sx = Scalar::from(x);
-        assert_eq!(sx + s1, Scalar::from(x + 1));
+        let value = 0x2323_2323_2323_2323_2323_2323_2323_2323u128;
+        assert_eq!(Scalar::from(value) + one, Scalar::from(value + 1));
     }
 
+    // clamping sets and clears the expected bits and is idempotent
     #[test]
-    fn test_scalar_clamp() {
+    fn clamp() {
         let input = A_SCALAR.bytes;
         let expected = [
             0x18, 0x0e, 0x97, 0x8a, 0x90, 0xf6, 0x62, 0x2d, 0x37, 0x47, 0x02, 0x3f, 0x8a, 0xd8,
@@ -1402,34 +1401,32 @@ pub mod test {
 
     // multiplication gives the same product whether or not either input is reduced first
     #[test]
-    fn test_mul_reduction_invariance() {
+    fn unreduced_product() {
         let mut rng = rand::rng();
 
         for _ in 0..10 {
-            let (a, b, c) = {
-                let mut a_bytes = [0u8; 32];
-                let mut b_bytes = [0u8; 32];
-                let mut c_bytes = [0u8; 32];
-                rng.fill_bytes(&mut a_bytes);
-                rng.fill_bytes(&mut b_bytes);
-                rng.fill_bytes(&mut c_bytes);
-                (
-                    Scalar { bytes: a_bytes },
-                    Scalar { bytes: b_bytes },
-                    Scalar {
-                        bytes: clamp_integer(c_bytes),
-                    },
-                )
+            let mut first_bytes = [0u8; 32];
+            let mut second_bytes = [0u8; 32];
+            let mut clamped_bytes = [0u8; 32];
+            rng.fill_bytes(&mut first_bytes);
+            rng.fill_bytes(&mut second_bytes);
+            rng.fill_bytes(&mut clamped_bytes);
+            let first = Scalar { bytes: first_bytes };
+            let second = Scalar {
+                bytes: second_bytes,
+            };
+            let clamped = Scalar {
+                bytes: clamp_integer(clamped_bytes),
             };
 
-            let reduced_mul_ab = a.reduce() * b.reduce();
-            let reduced_mul_ac = a.reduce() * c.reduce();
-            assert_eq!(a * b, reduced_mul_ab);
-            assert_eq!(a.reduce() * b, reduced_mul_ab);
-            assert_eq!(a * b.reduce(), reduced_mul_ab);
-            assert_eq!(a * c, reduced_mul_ac);
-            assert_eq!(a.reduce() * c, reduced_mul_ac);
-            assert_eq!(a * c.reduce(), reduced_mul_ac);
+            let reduced_second = first.reduce() * second.reduce();
+            let reduced_clamped = first.reduce() * clamped.reduce();
+            assert_eq!(first * second, reduced_second);
+            assert_eq!(first.reduce() * second, reduced_second);
+            assert_eq!(first * second.reduce(), reduced_second);
+            assert_eq!(first * clamped, reduced_clamped);
+            assert_eq!(first.reduce() * clamped, reduced_clamped);
+            assert_eq!(first * clamped.reduce(), reduced_clamped);
         }
     }
 }

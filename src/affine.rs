@@ -2,12 +2,14 @@
 
 // Vendored from curve25519-dalek, BSD-3-Clause
 
+use core::ops::Mul;
+
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+
 use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
 use crate::field::FieldElement;
 use crate::scalar::Scalar;
 use crate::traits::Identity;
-use core::ops::Mul;
-use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// An Edwards point in affine coordinates
 #[derive(Clone, Copy, Debug)]
@@ -97,6 +99,7 @@ mod tests {
     use super::{AffinePoint, EdwardsPoint, Identity};
     use crate::constants;
 
+    // the affine identity converts to the extended identity
     #[test]
     fn identity_conversion() {
         assert_eq!(
@@ -105,8 +108,9 @@ mod tests {
         );
     }
 
+    // the basepoint survives a trip through affine coordinates
     #[test]
-    fn generator_round_trip() {
+    fn round_trip() {
         let basepoint = constants::ED25519_BASEPOINT_POINT;
         assert_eq!(basepoint.to_affine().to_edwards(), basepoint);
     }

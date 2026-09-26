@@ -2,10 +2,9 @@
 
 // Vendored from the solana-ed25519 lanes fork, BSD-3-Clause
 
-#![allow(non_snake_case)]
+use subtle::ConstantTimeEq;
 
 use crate::scalar::Scalar;
-use subtle::ConstantTimeEq;
 
 /// A point type with an identity element
 pub trait Identity {
@@ -31,13 +30,13 @@ where
 
 /// A precomputed table of basepoint multiples for fixed-base multiplication
 pub trait BasepointTable {
-    /// The point type the table holds
+    /// The type of the points in the table
     type Point;
 
     /// Build a table from `basepoint`
     fn create(basepoint: &Self::Point) -> Self;
 
-    /// Recover the basepoint the table was built from
+    /// Recover the basepoint used to build the table
     fn basepoint(&self) -> Self::Point;
 
     /// Multiply the basepoint by `scalar` in constant time

@@ -210,7 +210,7 @@ macro_rules! impl_basepoint_table {
                 table
             }
 
-            /// Recover the basepoint this table was built from
+            /// Recover the basepoint used to build this table
             fn basepoint(&self) -> $point {
                 // Adding the affine Niels entry for 1B to the identity converts it to extended form
                 (&<$point>::identity() + &self.0[0].select(1)).as_extended()
