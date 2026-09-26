@@ -31,7 +31,7 @@ impl VerifyingKey {
         })
     }
 
-    /// The same from a slice of unknown length
+    /// Decompress a slice of unknown length
     pub fn from_slice(slice: &[u8]) -> Result<Self, Error> {
         let bytes: &[u8; VERIFYING_KEY_LENGTH] =
             slice.try_into().map_err(|_| Error::WrongLength {
@@ -41,7 +41,7 @@ impl VerifyingKey {
         Self::from_bytes(bytes)
     }
 
-    /// The key as it arrived
+    /// The key bytes in their original encoding
     pub fn as_bytes(&self) -> &[u8; VERIFYING_KEY_LENGTH] {
         &self.encoded
     }

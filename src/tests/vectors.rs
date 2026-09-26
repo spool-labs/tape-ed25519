@@ -1,22 +1,17 @@
-//! The RFC 8032 known-answer vectors, through the verifier
+//! The RFC 8032 known-answer vectors run through the verifier
+
+use alloc::vec::Vec;
 
 use crate::signature::Signature;
 use crate::tests::util::hex;
 use crate::verifying_key::{verify, VerifyingKey};
 
 /// Decode a hexadecimal test vector
-fn bytes(text: &str) -> alloc::vec::Vec<u8> {
-    let digits: alloc::vec::Vec<u8> = text
-        .bytes()
-        .map(|c| (c as char).to_digit(16).expect("a hex digit") as u8)
-        .collect();
-    digits
-        .chunks(2)
-        .map(|pair| pair[0] << 4 | pair[1])
-        .collect()
+fn bytes(text: &str) -> Vec<u8> {
+    hex::decode(text).expect("a test vector is valid hexadecimal")
 }
 
-/// One vector: the key accepts its own signature over the message
+/// Assert that a vector's key accepts its signature over the message
 fn accepts(key_text: &str, signature_text: &str, message_text: &str) {
     let key = VerifyingKey::from_slice(&bytes(key_text)).expect("the vector's key decodes");
     let signature =

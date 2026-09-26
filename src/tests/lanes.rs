@@ -4,32 +4,58 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::batch::verify_batch;
-use crate::lanes;
-use crate::signature::Signature;
+use crate::lanes::{self, Item};
+use crate::signature::{Signature, HALF_LENGTH, SIGNATURE_LENGTH};
 use crate::tests::util::{signed, small_order_cases, ZIP215_MESSAGE};
 use crate::verifying_key::verify_encoded;
 
-/// Message lengths straddling every SHA-512 padding boundary, and the sizes the grouping sorts on
+/// Message lengths across every SHA-512 padding boundary and the sizes the grouping sorts on
 const RAGGED_LENGTHS: [usize; 11] = [0, 1, 63, 64, 65, 127, 128, 129, 200, 1232, 4096];
 
-/// A deterministic generator, so a ragged arrival order replays without an RNG
+/// Multiplier of the linear congruential generator
+const GENERATOR_MULTIPLIER: u32 = 1_664_525;
+
+/// Increment of the linear congruential generator
+const GENERATOR_INCREMENT: u32 = 1_013_904_223;
+
+/// The generator drops this many low bits of its state
+const GENERATOR_SHIFT: u32 = 8;
+
+/// Each signing seed is the item index mixed with this mask
+const SEED_MASK: u8 = 0xC3;
+
+/// Every item at a multiple of this period stays honest
+const BREAK_PERIOD: usize = 3;
+
+/// Top byte of an `s` above the group order and below 2^253
+const NON_CANONICAL_S_TOP: u8 = 0x1f;
+
+/// Replay a ragged arrival order from a deterministic generator
 fn next(state: &mut u32) -> usize {
-    *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-    (*state >> 8) as usize
+    *state = state
+        .wrapping_mul(GENERATOR_MULTIPLIER)
+        .wrapping_add(GENERATOR_INCREMENT);
+    (*state >> GENERATOR_SHIFT) as usize
 }
 
-/// Every item signed by a key of its own
-fn sign_all(messages: &[Vec<u8>]) -> Vec<([u8; 32], Signature, &[u8])> {
+/// Sign every message under its own key
+fn sign_all(messages: &[Vec<u8>]) -> Vec<Item<'_>> {
     let mut items = Vec::with_capacity(messages.len());
     for (index, message) in messages.iter().enumerate() {
-        let (key, signature) = signed(index as u8 ^ 0xC3, message);
+        let (key, signature) = signed(index as u8 ^ SEED_MASK, message);
         items.push((key, signature, message.as_slice()));
     }
     items
 }
 
+/// Replace `s` with a value at or above the group order
+fn break_scalar(bytes: &mut [u8; SIGNATURE_LENGTH]) {
+    bytes[HALF_LENGTH..].copy_from_slice(&[0xff; HALF_LENGTH]);
+    bytes[SIGNATURE_LENGTH - 1] &= NON_CANONICAL_S_TOP;
+}
+
 /// Assert the lane verdicts equal the single verifier's item for item
-fn assert_matches_single(items: &[([u8; 32], Signature, &[u8])]) {
+fn assert_matches_single(items: &[Item<'_>]) {
     let verdicts = lanes::verify_batch(items);
     assert_eq!(verdicts.len(), items.len());
 
@@ -52,7 +78,10 @@ fn honest_signatures() {
 
     let verdicts = lanes::verify_batch(&items);
 
-    assert!(verdicts.iter().all(|&ok| ok), "honest signature refused");
+    assert!(
+        verdicts.iter().all(|&is_accepted| is_accepted),
+        "honest signature refused"
+    );
     for count in [0, 1, 3, 4, 7, 8, 9, 11, 12, 15, 16, 20, 21] {
         assert_matches_single(&items[..count]);
     }
@@ -78,14 +107,17 @@ fn ragged_lengths() {
 
         let verdicts = lanes::verify_batch(&items);
 
-        assert!(verdicts.iter().all(|&ok| ok), "refused in round {round}");
+        assert!(
+            verdicts.iter().all(|&is_accepted| is_accepted),
+            "refused in round {round}"
+        );
         assert_matches_single(&items);
     }
 }
 
 // every verdict returns to the item it belongs to, at anti-sorted lengths
 #[test]
-fn verdicts_follow_items() {
+fn verdict_order() {
     let lengths = [
         4096usize, 0, 1232, 1, 200, 63, 129, 64, 128, 65, 127, 1232, 0, 4096, 200,
     ];
@@ -99,28 +131,29 @@ fn verdicts_follow_items() {
     // Break every third item in a different way each time
     for (index, item) in items.iter_mut().enumerate() {
         let mut bytes = item.1.to_bytes();
-        match index % 3 {
+        match index % BREAK_PERIOD {
             0 => continue,
-            1 => bytes[index % 64] ^= 0x08,
-            2.. => {
-                bytes[32..].copy_from_slice(&[0xff; 32]);
-                bytes[63] &= 0x1f;
-            }
+            1 => bytes[index % SIGNATURE_LENGTH] ^= 0x08,
+            2.. => break_scalar(&mut bytes),
         }
         item.1 = Signature::from_bytes(&bytes);
     }
 
     let verdicts = lanes::verify_batch(&items);
 
-    for (index, &ok) in verdicts.iter().enumerate() {
-        assert_eq!(ok, index % 3 == 0, "verdict landed on the wrong item");
+    for (index, &is_accepted) in verdicts.iter().enumerate() {
+        assert_eq!(
+            is_accepted,
+            index % BREAK_PERIOD == 0,
+            "verdict landed on the wrong item"
+        );
     }
     assert_matches_single(&items);
 }
 
 // batches either side of the point where the group ordering leaves the stack
 #[test]
-fn spans_stack_limit() {
+fn stack_limit() {
     let mut state = 0xFEED_0BADu32;
 
     for count in [127usize, 128, 129, 200] {
@@ -131,15 +164,15 @@ fn spans_stack_limit() {
 
         for index in (3..count).step_by(17) {
             let mut bytes = items[index].1.to_bytes();
-            bytes[index % 64] ^= 0x20;
+            bytes[index % SIGNATURE_LENGTH] ^= 0x20;
             items[index].1 = Signature::from_bytes(&bytes);
         }
 
         let verdicts = lanes::verify_batch(&items);
 
-        for (index, &ok) in verdicts.iter().enumerate() {
+        for (index, &is_accepted) in verdicts.iter().enumerate() {
             let is_broken = index >= 3 && (index - 3) % 17 == 0;
-            assert_eq!(ok, !is_broken, "count={count}, index {index}");
+            assert_eq!(is_accepted, !is_broken, "count={count}, index {index}");
         }
         assert_matches_single(&items);
     }
@@ -147,9 +180,9 @@ fn spans_stack_limit() {
 
 // a refused item of any kind costs its own lane and no other
 #[test]
-fn lanes_are_independent() {
+fn independent_lanes() {
     let message: &[u8] = b"wide lanes";
-    let mut items: Vec<([u8; 32], Signature, &[u8])> = (0..8u8)
+    let mut items: Vec<Item<'_>> = (0..8u8)
         .map(|index| {
             let (key, signature) = signed(40 + index, message);
             (key, signature, message)
@@ -161,8 +194,7 @@ fn lanes_are_independent() {
     items[1].1 = Signature::from_bytes(&corrupted_r);
 
     let mut non_canonical_s = items[2].1.to_bytes();
-    non_canonical_s[32..].copy_from_slice(&[0xff; 32]);
-    non_canonical_s[63] &= 0x1f;
+    break_scalar(&mut non_canonical_s);
     items[2].1 = Signature::from_bytes(&non_canonical_s);
 
     items[3].0 = [0x05; 32];
@@ -180,9 +212,9 @@ fn lanes_are_independent() {
 
 // the lane verdicts match the single verifier on every ZIP-215 small-order case
 #[test]
-fn small_order_cases_match() {
+fn small_order() {
     let cases = small_order_cases();
-    let items: Vec<([u8; 32], Signature, &[u8])> = cases
+    let items: Vec<Item<'_>> = cases
         .iter()
         .map(|case| {
             (
@@ -198,9 +230,9 @@ fn small_order_cases_match() {
 
 // the public entry point agrees with the lane pipeline on any host
 #[test]
-fn dispatch_matches_lanes() {
+fn dispatch() {
     let message: &[u8] = b"dispatch";
-    let items: Vec<([u8; 32], Signature, &[u8])> = (0..9u8)
+    let items: Vec<Item<'_>> = (0..9u8)
         .map(|index| {
             let (key, signature) = signed(70 + index, message);
             (key, signature, message)

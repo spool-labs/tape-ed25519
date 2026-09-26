@@ -1,4 +1,4 @@
-//! What a verification call says when it does not accept
+//! Errors from key decoding and signature verification
 
 use thiserror::Error;
 
@@ -16,10 +16,10 @@ pub enum Error {
     /// A decoder received a slice of the wrong length
     #[error("slice is {given} bytes, expected {expected}")]
     WrongLength {
-        /// Length of the slice the caller passed
+        /// Length of the slice from the caller
         given: usize,
 
-        /// Length the decoder expects
+        /// The decoder expects this length
         expected: usize,
     },
 }

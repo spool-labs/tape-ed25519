@@ -1,4 +1,4 @@
-//! Signing, encodings and edge-case vectors the test modules share
+//! Shared signing helpers, encodings and edge-case vectors for the tests
 
 use alloc::vec::Vec;
 use std::string::String;
@@ -10,13 +10,16 @@ use crate::edwards::CompressedEdwardsY;
 use crate::scalar::Scalar;
 use crate::signature::Signature;
 
-/// Byte strings that decode to a point of order dividing the cofactor 8
+/// Count of encodings that decode to a point of order dividing the cofactor 8
 pub const LOW_ORDER_COUNT: usize = 14;
 
-/// The message the ZIP-215 vectors are signed over
+/// The first non-canonical point encodings up to this count have low order
+const LOW_ORDER_NON_CANONICAL_COUNT: usize = 6;
+
+/// The ZIP-215 vectors sign this message
 pub const ZIP215_MESSAGE: &[u8] = b"Zcash";
 
-/// One encoded key and signature, with what each rule should say about it
+/// One encoded key and signature with the expected verdict under each rule
 pub struct TestCase {
     /// The encoded verifying key
     pub key: [u8; 32],
@@ -36,7 +39,7 @@ pub fn signing_key(seed: u8) -> ed25519_dalek::SigningKey {
     ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
 }
 
-/// Sign `message` and hand back the item the batch verifier takes
+/// Sign `message` and return the encoded key and signature
 pub fn signed(seed: u8, message: &[u8]) -> ([u8; 32], Signature) {
     let key = signing_key(seed);
     let signature = key.sign(message);
@@ -46,7 +49,7 @@ pub fn signed(seed: u8, message: &[u8]) -> ([u8; 32], Signature) {
     )
 }
 
-/// Lowercase hexadecimal, for the message a failing assertion prints
+/// Encode bytes as lowercase hexadecimal for failure messages
 pub fn hex(bytes: &[u8]) -> String {
     hex::encode(bytes)
 }
@@ -111,13 +114,18 @@ pub fn low_order_encodings() -> Vec<[u8; 32]> {
     for point in EIGHT_TORSION.iter() {
         encodings.push(point.compress().to_bytes());
     }
-    for encoding in non_canonical_point_encodings().into_iter().take(6) {
+    for encoding in non_canonical_point_encodings()
+        .into_iter()
+        .take(LOW_ORDER_NON_CANONICAL_COUNT)
+    {
         encodings.push(encoding);
     }
 
     assert_eq!(encodings.len(), LOW_ORDER_COUNT);
     for encoding in &encodings {
-        let point = CompressedEdwardsY(*encoding).decompress().expect("decodes");
+        let point = CompressedEdwardsY(*encoding)
+            .decompress()
+            .expect("a low-order encoding decodes");
         assert!(
             point.is_small_order(),
             "{} is not small order",

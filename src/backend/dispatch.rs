@@ -9,7 +9,7 @@ use crate::scalar::Scalar;
 /// A scalar below 2^128 has zero bytes from this index up
 const HALF_SCALAR_LENGTH: usize = 16;
 
-/// Which field arithmetic this host runs
+/// A field arithmetic backend for the running host
 #[derive(Clone, Copy)]
 enum BackendKind {
     #[cfg(curve25519_backend = "simd")]

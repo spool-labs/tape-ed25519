@@ -7,19 +7,22 @@ use tape_ed25519::batch::verify_batch;
 use tape_ed25519::signature::Signature;
 use tape_ed25519::verifying_key::{verify, VerifyingKey};
 
-/// Message length one row measures, which is a full Solana packet
+/// Each row measures messages of this length, a full Solana packet
 const MESSAGE_LENGTH: usize = 1232;
 
-/// Batch sizes the rows cover
+/// Batch sizes for the batch rows
 const BATCH_SIZES: [usize; 3] = [1, 8, 64];
 
-/// `count` signed items, each under a key of its own
+/// Each key seed byte is the item index mixed with this mask
+const KEY_SEED_MASK: u8 = 0x3B;
+
+/// Sign `count` items, each under its own key
 fn signed(count: usize) -> Vec<([u8; 32], [u8; 64], Vec<u8>)> {
     let mut items = Vec::with_capacity(count);
     for index in 0..count {
-        let key = ed25519_dalek::SigningKey::from_bytes(&[index as u8 ^ 0x3B; 32]);
+        let key = ed25519_dalek::SigningKey::from_bytes(&[index as u8 ^ KEY_SEED_MASK; 32]);
         let message: Vec<u8> = (0..MESSAGE_LENGTH)
-            .map(|at| (at as u8) ^ (index as u8))
+            .map(|position| (position as u8) ^ (index as u8))
             .collect();
         let signature = key.sign(&message);
         items.push((
@@ -31,7 +34,7 @@ fn signed(count: usize) -> Vec<([u8; 32], [u8; 64], Vec<u8>)> {
     items
 }
 
-/// One item through the crates.io verifier, the key decoded as part of the call
+/// Verify one item with the crates.io verifier and decode the key inside the call
 fn zebra_verify(key: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> bool {
     let signature = solana_ed25519::ed_sigs::Signature::from_bytes(signature);
     solana_ed25519::ed_sigs::VerificationKey::try_from(*key)

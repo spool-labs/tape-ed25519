@@ -5,11 +5,11 @@ use std::format;
 use crate::constants;
 use crate::edwards::CompressedEdwardsY;
 use crate::error::Error;
-use crate::signature::Signature;
+use crate::signature::{Signature, SIGNATURE_LENGTH};
 use crate::tests::util::signed;
-use crate::verifying_key::{verify, VerifyingKey};
+use crate::verifying_key::{verify, VerifyingKey, VERIFYING_KEY_LENGTH};
 
-/// A key from `seed` and its signature over `message`, both decoded
+/// Decode a key from `seed` and its signature over `message`
 fn pair(seed: u8, message: &[u8]) -> (VerifyingKey, Signature) {
     let (encoded, signature) = signed(seed, message);
     (
@@ -18,7 +18,7 @@ fn pair(seed: u8, message: &[u8]) -> (VerifyingKey, Signature) {
     )
 }
 
-/// The first encoding that does not decompress, for the refusal tests
+/// Find the first encoding that fails decompression
 fn undecodable_point() -> [u8; 32] {
     for candidate in 0u16..=u16::MAX {
         let mut bytes = [0u8; 32];
@@ -56,7 +56,7 @@ fn wrong_message() {
 
 // an s at or above the group order is refused
 #[test]
-fn non_canonical_scalar() {
+fn unreduced_scalar() {
     let (key, signature) = pair(4, b"non-canonical s");
     let mut bytes = signature.to_bytes();
     bytes[32..].copy_from_slice(&constants::BASEPOINT_ORDER.to_bytes());
@@ -86,28 +86,28 @@ fn undecodable_key() {
     assert_eq!(checked, Err(Error::MalformedPublicKey));
 }
 
-// a slice of the wrong length is refused with the length it was given
+// a slice of the wrong length is refused and the error reports both lengths
 #[test]
 fn wrong_lengths() {
     assert_eq!(
-        VerifyingKey::from_slice(&[0u8; 31]),
+        VerifyingKey::from_slice(&[0u8; VERIFYING_KEY_LENGTH - 1]),
         Err(Error::WrongLength {
-            given: 31,
-            expected: 32
+            given: VERIFYING_KEY_LENGTH - 1,
+            expected: VERIFYING_KEY_LENGTH
         })
     );
     assert_eq!(
-        Signature::from_slice(&[0u8; 65]),
+        Signature::from_slice(&[0u8; SIGNATURE_LENGTH + 1]),
         Err(Error::WrongLength {
-            given: 65,
-            expected: 64
+            given: SIGNATURE_LENGTH + 1,
+            expected: SIGNATURE_LENGTH
         })
     );
 }
 
 // the two halves survive a round trip through the encoded form
 #[test]
-fn signature_round_trip() {
+fn round_trip() {
     let (_, signature) = signed(9, b"round trip");
 
     let bytes = signature.to_bytes();

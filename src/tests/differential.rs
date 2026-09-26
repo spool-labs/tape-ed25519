@@ -3,16 +3,31 @@
 use alloc::vec::Vec;
 
 use crate::batch::verify_batch;
-use crate::lanes;
-use crate::signature::Signature;
+use crate::lanes::{self, Item};
+use crate::signature::{Signature, HALF_LENGTH, SIGNATURE_LENGTH};
 use crate::tests::util::{
     hex, low_order_encodings, non_canonical_point_encodings, signed, small_order_cases,
     ZIP215_MESSAGE,
 };
-use crate::verifying_key::verify_encoded;
+use crate::verifying_key::{verify_encoded, VERIFYING_KEY_LENGTH};
 
-/// Random cases the harness draws
+/// Each test draws this many random cases
 const ROUNDS: usize = 10_000;
+
+/// Number of `Shape` variants
+const SHAPE_COUNT: usize = 7;
+
+/// Message lengths cycle through this many kinds
+const LENGTH_KINDS: usize = 5;
+
+/// Longest random message length
+const RANDOM_LENGTH_BOUND: usize = 300;
+
+/// Top byte of an `s` above the group order and below 2^253
+const NON_CANONICAL_S_TOP: u8 = 0x1f;
+
+/// Seed of the honest signature over the ZIP-215 message
+const EDGE_SEED: u8 = 7;
 
 /// How a case was built, for the failure message
 #[derive(Clone, Copy, Debug)]
@@ -40,9 +55,9 @@ enum Shape {
 }
 
 impl Shape {
-    /// The shape for one draw, which spreads the seven kinds evenly
+    /// Spread the shapes evenly over the draws
     fn of(draw: usize) -> Self {
-        match draw % 7 {
+        match draw % SHAPE_COUNT {
             0 => Shape::Honest,
             1 => Shape::BrokenScalar,
             2 => Shape::BrokenPoint,
@@ -54,18 +69,19 @@ impl Shape {
     }
 }
 
-/// One case and the message it covers
+/// One case and its signed message
 struct Case {
-    key: [u8; 32],
-    signature: [u8; 64],
+    key: [u8; VERIFYING_KEY_LENGTH],
+    signature: [u8; SIGNATURE_LENGTH],
     message: Vec<u8>,
     shape: Shape,
 }
 
-/// A deterministic generator, so a failing round replays from the seed
-struct Rng(u64);
+/// A deterministic xorshift generator that replays a failing round from its seed
+struct Generator(u64);
 
-impl Rng {
+impl Generator {
+    /// Advance the state and return it
     fn next(&mut self) -> u64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
@@ -73,6 +89,7 @@ impl Rng {
         self.0
     }
 
+    /// Draw a value below `bound`
     fn below(&mut self, bound: usize) -> usize {
         (self.next() % bound as u64) as usize
     }
@@ -86,7 +103,7 @@ fn zebra_verdict(case: &Case) -> bool {
         .is_ok()
 }
 
-/// What `ed25519-dalek`'s pre-ZIP-215 rules say about one case
+/// The pre-ZIP-215 verdict of `ed25519-dalek` on one case
 fn strict_verdict(case: &Case) -> bool {
     ed25519_dalek::VerifyingKey::from_bytes(&case.key)
         .and_then(|key| {
@@ -98,45 +115,45 @@ fn strict_verdict(case: &Case) -> bool {
         .is_ok()
 }
 
-/// Draw one case of the shape `draw` calls for
-fn draw_case(rng: &mut Rng, draw: usize) -> Case {
+/// Draw one case of the shape for `draw`
+fn draw_case(generator: &mut Generator, draw: usize) -> Case {
     let shape = Shape::of(draw);
-    let length = match draw % 5 {
+    let length = match draw % LENGTH_KINDS {
         0 => 0,
         1 => 1,
         2 => 32,
         3 => 1232,
-        4.. => rng.below(300),
+        4.. => generator.below(RANDOM_LENGTH_BOUND),
     };
-    let message: Vec<u8> = (0..length).map(|_| (rng.next() & 0xff) as u8).collect();
-    let seed = (rng.next() & 0xff) as u8;
+    let message: Vec<u8> = (0..length).map(|_| generator.next() as u8).collect();
+    let seed = generator.next() as u8;
     let (mut key, signature) = signed(seed, &message);
     let mut bytes = signature.to_bytes();
 
     match shape {
         Shape::Honest => {}
         Shape::BrokenScalar => {
-            let bit = rng.below(8);
-            bytes[32 + rng.below(31)] ^= 1 << bit;
+            let bit = generator.below(u8::BITS as usize);
+            bytes[HALF_LENGTH + generator.below(HALF_LENGTH - 1)] ^= 1 << bit;
         }
         Shape::BrokenPoint => {
-            let bit = rng.below(8);
-            bytes[rng.below(32)] ^= 1 << bit;
+            let bit = generator.below(u8::BITS as usize);
+            bytes[generator.below(HALF_LENGTH)] ^= 1 << bit;
         }
         Shape::WrongKey => key = signed(seed.wrapping_add(1), &message).0,
         Shape::NonCanonicalScalar => {
-            bytes[32..].copy_from_slice(&[0xff; 32]);
-            bytes[63] &= 0x1f;
+            bytes[HALF_LENGTH..].copy_from_slice(&[0xff; HALF_LENGTH]);
+            bytes[SIGNATURE_LENGTH - 1] &= NON_CANONICAL_S_TOP;
         }
         Shape::NonCanonicalKey => {
             let encodings = non_canonical_point_encodings();
-            key = encodings[rng.below(encodings.len())];
+            key = encodings[generator.below(encodings.len())];
         }
         Shape::LowOrder => {
             let encodings = low_order_encodings();
-            key = encodings[rng.below(encodings.len())];
-            bytes[..32].copy_from_slice(&encodings[rng.below(encodings.len())]);
-            bytes[32..].copy_from_slice(&[0u8; 32]);
+            key = encodings[generator.below(encodings.len())];
+            bytes[..HALF_LENGTH].copy_from_slice(&encodings[generator.below(encodings.len())]);
+            bytes[HALF_LENGTH..].copy_from_slice(&[0u8; HALF_LENGTH]);
         }
     }
 
@@ -148,7 +165,7 @@ fn draw_case(rng: &mut Rng, draw: usize) -> Case {
     }
 }
 
-/// The ZIP-215 edge vectors as cases, with the low-order encodings under an ordinary message
+/// Build cases from the ZIP-215 edge vectors and each low-order key under an honest signature
 fn edge_cases() -> Vec<Case> {
     let mut cases = Vec::new();
     for case in small_order_cases() {
@@ -160,7 +177,7 @@ fn edge_cases() -> Vec<Case> {
         });
     }
     for key in low_order_encodings() {
-        let (_, signature) = signed(7, ZIP215_MESSAGE);
+        let (_, signature) = signed(EDGE_SEED, ZIP215_MESSAGE);
         cases.push(Case {
             key,
             signature: signature.to_bytes(),
@@ -174,13 +191,13 @@ fn edge_cases() -> Vec<Case> {
 // verify, verify_batch and the lane pipeline all agree with verify_zebra on every case
 #[test]
 fn matches_zebra() {
-    let mut rng = Rng(0x2026_0918_1200_0001);
+    let mut generator = Generator(0x2026_0918_1200_0001);
     let mut cases = edge_cases();
     for draw in 0..ROUNDS {
-        cases.push(draw_case(&mut rng, draw));
+        cases.push(draw_case(&mut generator, draw));
     }
 
-    let items: Vec<([u8; 32], Signature, &[u8])> = cases
+    let items: Vec<Item<'_>> = cases
         .iter()
         .map(|case| {
             (
@@ -223,24 +240,24 @@ fn matches_zebra() {
 
 // verify_strict differs from ZIP-215 only where a point is low order or encoded non-canonically
 #[test]
-fn strict_differs_where_documented() {
-    let mut rng = Rng(0x2026_0918_1200_0002);
+fn strict_differs() {
+    let mut generator = Generator(0x2026_0918_1200_0002);
     let mut cases = edge_cases();
     for draw in 0..ROUNDS {
-        cases.push(draw_case(&mut rng, draw));
+        cases.push(draw_case(&mut generator, draw));
     }
 
     let mut divergences = 0usize;
     for case in &cases {
-        let ours = zebra_verdict(case);
+        let zip215 = zebra_verdict(case);
         let strict = strict_verdict(case);
-        if ours == strict {
+        if zip215 == strict {
             continue;
         }
 
         divergences += 1;
         assert!(
-            ours && !strict,
+            zip215 && !strict,
             "verify_strict accepted what ZIP-215 refused: key={} signature={}",
             hex(&case.key),
             hex(&case.signature),

@@ -25,7 +25,7 @@ impl Signature {
         Self { r, s }
     }
 
-    /// The same from a slice of unknown length
+    /// Split a slice of unknown length into the two halves
     pub fn from_slice(slice: &[u8]) -> Result<Self, Error> {
         let bytes: &[u8; SIGNATURE_LENGTH] = slice.try_into().map_err(|_| Error::WrongLength {
             given: slice.len(),
@@ -34,7 +34,7 @@ impl Signature {
         Ok(Self::from_bytes(bytes))
     }
 
-    /// The signature back in its encoded form
+    /// Encode the signature back into 64 bytes
     pub fn to_bytes(&self) -> [u8; SIGNATURE_LENGTH] {
         let mut bytes = [0u8; SIGNATURE_LENGTH];
         bytes[..HALF_LENGTH].copy_from_slice(&self.r);

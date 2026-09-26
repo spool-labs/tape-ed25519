@@ -1,4 +1,4 @@
-//! The ZIP-215 edge cases: low-order points, non-canonical encodings, and what each rule says
+//! The ZIP-215 edge cases for low-order points and non-canonical encodings under each rule
 
 use alloc::vec::Vec;
 use std::format;
@@ -7,24 +7,35 @@ use crate::batch::verify_batch;
 use crate::challenge::challenge;
 use crate::constants::ED25519_BASEPOINT_POINT;
 use crate::edwards::{CompressedEdwardsY, EdwardsPoint};
+use crate::lanes::Item;
 use crate::scalar::Scalar;
-use crate::signature::Signature;
-use crate::tests::util::{hex, low_order_encodings, small_order_cases, ZIP215_MESSAGE};
-use crate::verifying_key::{verify, VerifyingKey};
+use crate::signature::{Signature, HALF_LENGTH, SIGNATURE_LENGTH};
+use crate::tests::util::{
+    hex, low_order_encodings, small_order_cases, LOW_ORDER_COUNT, ZIP215_MESSAGE,
+};
+use crate::verifying_key::{verify, VerifyingKey, VERIFYING_KEY_LENGTH};
 
 /// A forgery attempt tries this many messages, eight times the expected need at `ord(A) = 8`
 const GRIND_ATTEMPTS: u32 = 64;
 
-/// What this crate says about one case
-fn zip215_verdict(key: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> bool {
+/// This crate's verdict on one case
+fn zip215_verdict(
+    key: &[u8; VERIFYING_KEY_LENGTH],
+    signature: &[u8; SIGNATURE_LENGTH],
+    message: &[u8],
+) -> bool {
     match VerifyingKey::from_bytes(key) {
         Ok(key) => verify(&key, &Signature::from_bytes(signature), message).is_ok(),
         Err(_) => false,
     }
 }
 
-/// What the pre-ZIP-215 rules say about one case, through `ed25519-dalek`
-fn strict_verdict(key: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> bool {
+/// The pre-ZIP-215 verdict of `ed25519-dalek` on one case
+fn strict_verdict(
+    key: &[u8; VERIFYING_KEY_LENGTH],
+    signature: &[u8; SIGNATURE_LENGTH],
+    message: &[u8],
+) -> bool {
     ed25519_dalek::VerifyingKey::from_bytes(key)
         .and_then(|key| {
             key.verify_strict(message, &ed25519_dalek::Signature::from_bytes(signature))
@@ -34,9 +45,9 @@ fn strict_verdict(key: &[u8; 32], signature: &[u8; 64], message: &[u8]) -> bool 
 
 // every low-order pair with s = 0 is accepted under ZIP-215 and refused under the strict rules
 #[test]
-fn small_order_pairs() {
+fn low_order() {
     let cases = small_order_cases();
-    assert_eq!(cases.len(), 14 * 14);
+    assert_eq!(cases.len(), LOW_ORDER_COUNT * LOW_ORDER_COUNT);
 
     for case in &cases {
         assert_eq!(
@@ -58,9 +69,9 @@ fn small_order_pairs() {
 
 // the batch verifier agrees with the single one on every small-order case
 #[test]
-fn small_order_batch() {
+fn batch_order() {
     let cases = small_order_cases();
-    let items: Vec<([u8; 32], Signature, &[u8])> = cases
+    let items: Vec<Item<'_>> = cases
         .iter()
         .map(|case| {
             (
@@ -82,15 +93,14 @@ fn small_order_batch() {
     }
 }
 
-// a low-order key admits a satisfied equation, which is why the strict rules test the order
+// a low-order key admits a satisfied equation, so the strict rules must test the order
 #[test]
-#[allow(non_snake_case)]
-fn low_order_forgeries() {
+fn forgeries() {
     let s = Scalar::from(1u64);
     let r_bytes = (ED25519_BASEPOINT_POINT * s).compress().to_bytes();
-    let mut signature = [0u8; 64];
-    signature[..32].copy_from_slice(&r_bytes);
-    signature[32..].copy_from_slice(s.as_bytes());
+    let mut signature = [0u8; SIGNATURE_LENGTH];
+    signature[..HALF_LENGTH].copy_from_slice(&r_bytes);
+    signature[HALF_LENGTH..].copy_from_slice(s.as_bytes());
 
     let mut forgeable = 0usize;
     for key_bytes in low_order_encodings() {
@@ -101,10 +111,13 @@ fn low_order_forgeries() {
             let message = format!("pay attacker {attempt}").into_bytes();
 
             // Check the bare equation without the order tests
-            let k = challenge(&r_bytes, &key_bytes, &message);
-            let expected_r =
-                EdwardsPoint::vartime_double_scalar_mul_basepoint(&k, &negated(&key), &s)
-                    .compress();
+            let challenge_scalar = challenge(&r_bytes, &key_bytes, &message);
+            let expected_r = EdwardsPoint::vartime_double_scalar_mul_basepoint(
+                &challenge_scalar,
+                &negated(&key),
+                &s,
+            )
+            .compress();
             if expected_r.as_bytes() != &r_bytes {
                 continue;
             }
@@ -122,11 +135,13 @@ fn low_order_forgeries() {
         }
     }
 
-    assert_eq!(forgeable, 14, "every low-order encoding admits a forgery");
+    assert_eq!(
+        forgeable, LOW_ORDER_COUNT,
+        "every low-order encoding admits a forgery"
+    );
 }
 
-/// The `-A` the verification equation uses, recovered from the encoded key
-#[allow(non_snake_case)]
+/// Recover the negated key point from the encoded key
 fn negated(key: &VerifyingKey) -> EdwardsPoint {
     -CompressedEdwardsY(*key.as_bytes())
         .decompress()
