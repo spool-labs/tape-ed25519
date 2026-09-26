@@ -51,7 +51,7 @@ impl Shape {
             3 => Shape::WrongKey,
             4 => Shape::NonCanonicalScalar,
             5 => Shape::NonCanonicalKey,
-            _ => Shape::LowOrder,
+            6.. => Shape::LowOrder,
         }
     }
 }
@@ -108,7 +108,7 @@ fn draw_case(rng: &mut Rng, draw: usize) -> Case {
         1 => 1,
         2 => 32,
         3 => 1232,
-        _ => rng.below(300),
+        4.. => rng.below(300),
     };
     let message: Vec<u8> = (0..length).map(|_| (rng.next() & 0xff) as u8).collect();
     let seed = (rng.next() & 0xff) as u8;

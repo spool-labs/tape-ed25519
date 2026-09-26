@@ -70,9 +70,9 @@ fn ragged_lengths() {
         let count = 4 + round * 3;
         let messages: Vec<Vec<u8>> = (0..count)
             .map(|index| {
-                let length = match round % 2 {
-                    0 => RAGGED_LENGTHS[next(&mut state) % RAGGED_LENGTHS.len()],
-                    _ => next(&mut state) % 4200,
+                let length = match round % 2 == 0 {
+                    true => RAGGED_LENGTHS[next(&mut state) % RAGGED_LENGTHS.len()],
+                    false => next(&mut state) % 4200,
                 };
                 vec![(index as u8) ^ 0x3C; length]
             })
@@ -103,12 +103,12 @@ fn verdicts_follow_items() {
     for (index, item) in items.iter_mut().enumerate() {
         let mut bytes = item.1.to_bytes();
         match index % 3 {
+            0 => continue,
             1 => bytes[index % 64] ^= 0x08,
-            2 => {
+            2.. => {
                 bytes[32..].copy_from_slice(&[0xff; 32]);
                 bytes[63] &= 0x1f;
             }
-            _ => continue,
         }
         item.1 = Signature::from_bytes(&bytes);
     }

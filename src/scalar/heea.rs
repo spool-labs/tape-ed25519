@@ -567,7 +567,7 @@ impl I256 {
                 3 => {
                     result[3] = l[0];
                 }
-                _ => {}
+                4.. => {}
             }
         } else {
             let carry = 64 - bit_shift;
@@ -590,7 +590,7 @@ impl I256 {
                 3 => {
                     result[3] = l[0] << bit_shift;
                 }
-                _ => {}
+                4.. => {}
             }
         }
 
