@@ -6,20 +6,14 @@
 
 use core::ops::{Add, Neg, Sub};
 
-use subtle::Choice;
-use subtle::ConditionallySelectable;
-
 use curve25519_dalek_derive::unsafe_target_feature;
+use subtle::{Choice, ConditionallySelectable};
 
+use crate::backend::vector::avx2::constants;
+use crate::backend::vector::avx2::field::{FieldElement2625x4, Lanes, Shuffle};
 use crate::edwards;
-use crate::window::{LookupTable, NafLookupTable5};
-
-use crate::window::NafLookupTable8;
-
 use crate::traits::Identity;
-
-use super::constants;
-use super::field::{FieldElement2625x4, Lanes, Shuffle};
+use crate::window::{LookupTable, NafLookupTable5, NafLookupTable8};
 
 /// A point in extended coordinates with every limb bounded by b < 0.007
 #[derive(Clone, Copy, Debug)]
@@ -241,220 +235,132 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable8<CachedPoint> {
 
 #[cfg(target_feature = "avx2")]
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
+    use crate::backend::serial::u64::field::FieldElement51;
+    use crate::backend::vector::avx2::constants::BASEPOINT_ODD_LOOKUP_TABLE;
+    use crate::constants as curve_constants;
+    use crate::scalar::Scalar;
 
+    /// A scalar for a basepoint multiple with a nontrivial Z
+    const SAMPLE_SCALAR: u64 = 8475983829;
+
+    /// The parallel addition formulas evaluated with serial field arithmetic
     #[rustfmt::skip]
-    fn serial_add(P: edwards::EdwardsPoint, Q: edwards::EdwardsPoint) -> edwards::EdwardsPoint {
-        use crate::backend::serial::u64::field::FieldElement51;
-
-        let (X1, Y1, Z1, T1) = (P.X, P.Y, P.Z, P.T);
-        let (X2, Y2, Z2, T2) = (Q.X, Q.Y, Q.Z, Q.T);
-
-        macro_rules! print_var {
-            ($x:ident) => {
-                println!("{} = {:?}", stringify!($x), $x.to_bytes());
-            };
-        }
+    fn serial_add(first: edwards::EdwardsPoint, second: edwards::EdwardsPoint) -> edwards::EdwardsPoint {
+        let (X1, Y1, Z1, T1) = (first.X, first.Y, first.Z, first.T);
+        let (X2, Y2, Z2, T2) = (second.X, second.Y, second.Z, second.T);
 
         let S0 = &Y1 - &X1;
         let S1 = &Y1 + &X1;
         let S2 = &Y2 - &X2;
         let S3 = &Y2 + &X2;
-        print_var!(S0);
-        print_var!(S1);
-        print_var!(S2);
-        print_var!(S3);
-        println!("");
 
         let S4 = &S0 * &S2;
         let S5 = &S1 * &S3;
         let S6 = &Z1 * &Z2;
         let S7 = &T1 * &T2;
-        print_var!(S4);
-        print_var!(S5);
-        print_var!(S6);
-        print_var!(S7);
-        println!("");
 
         let S8  =  &S4 *    &FieldElement51([  121666,0,0,0,0]);
         let S9  =  &S5 *    &FieldElement51([  121666,0,0,0,0]);
         let S10 =  &S6 *    &FieldElement51([2*121666,0,0,0,0]);
         let S11 =  &S7 * &(-&FieldElement51([2*121665,0,0,0,0]));
-        print_var!(S8);
-        print_var!(S9);
-        print_var!(S10);
-        print_var!(S11);
-        println!("");
 
         let S12 =  &S9 - &S8;
         let S13 =  &S9 + &S8;
         let S14 = &S10 - &S11;
         let S15 = &S10 + &S11;
-        print_var!(S12);
-        print_var!(S13);
-        print_var!(S14);
-        print_var!(S15);
-        println!("");
-
-        let X3 = &S12 * &S14;
-        let Y3 = &S15 * &S13;
-        let Z3 = &S15 * &S14;
-        let T3 = &S12 * &S13;
 
         edwards::EdwardsPoint {
-            X: X3,
-            Y: Y3,
-            Z: Z3,
-            T: T3,
+            X: &S12 * &S14,
+            Y: &S15 * &S13,
+            Z: &S15 * &S14,
+            T: &S12 * &S13,
         }
     }
 
-    fn addition_test_helper(P: edwards::EdwardsPoint, Q: edwards::EdwardsPoint) {
-        let R_serial: edwards::EdwardsPoint = serial_add(P.into(), Q.into()).into();
-
-        let cached_Q = CachedPoint::from(ExtendedPoint::from(Q));
-        let R_vector: edwards::EdwardsPoint = (&ExtendedPoint::from(P) + &cached_Q).into();
-        let S_vector: edwards::EdwardsPoint = (&ExtendedPoint::from(P) - &cached_Q).into();
-
-        println!("Testing point addition:");
-        println!("P = {:?}", P);
-        println!("Q = {:?}", Q);
-        println!("cached Q = {:?}", cached_Q);
-        println!("R = P + Q = {:?}", &P + &Q);
-        println!("R_serial = {:?}", R_serial);
-        println!("R_vector = {:?}", R_vector);
-        println!("S = P - Q = {:?}", &P - &Q);
-        println!("S_vector = {:?}", S_vector);
-        assert_eq!(R_serial.compress(), (&P + &Q).compress());
-        assert_eq!(R_vector.compress(), (&P + &Q).compress());
-        assert_eq!(S_vector.compress(), (&P - &Q).compress());
-        println!("OK!\n");
-    }
-
-    #[test]
-    fn vector_addition_vs_serial_addition_vs_edwards_extendedpoint() {
-        use crate::constants;
-        use crate::scalar::Scalar;
-
-        println!("Testing id +- id");
-        let P = edwards::EdwardsPoint::identity();
-        let Q = edwards::EdwardsPoint::identity();
-        addition_test_helper(P, Q);
-
-        println!("Testing id +- B");
-        let P = edwards::EdwardsPoint::identity();
-        let Q = constants::ED25519_BASEPOINT_POINT;
-        addition_test_helper(P, Q);
-
-        println!("Testing B +- B");
-        let P = constants::ED25519_BASEPOINT_POINT;
-        let Q = constants::ED25519_BASEPOINT_POINT;
-        addition_test_helper(P, Q);
-
-        println!("Testing B +- kB");
-        let P = constants::ED25519_BASEPOINT_POINT;
-        let Q = constants::ED25519_BASEPOINT_TABLE * &Scalar::from(8475983829u64);
-        addition_test_helper(P, Q);
-    }
-
-    fn serial_double(P: edwards::EdwardsPoint) -> edwards::EdwardsPoint {
-        let (X1, Y1, Z1, _T1) = (P.X, P.Y, P.Z, P.T);
-
-        macro_rules! print_var {
-            ($x:ident) => {
-                println!("{} = {:?}", stringify!($x), $x.to_bytes());
-            };
-        }
+    /// The parallel doubling formulas evaluated with serial field arithmetic
+    fn serial_double(point: edwards::EdwardsPoint) -> edwards::EdwardsPoint {
+        let (X1, Y1, Z1) = (point.X, point.Y, point.Z);
 
         let S0 = &X1 + &Y1;
-        print_var!(S0);
-        println!("");
 
         let S1 = X1.square();
         let S2 = Y1.square();
         let S3 = Z1.square();
         let S4 = S0.square();
-        print_var!(S1);
-        print_var!(S2);
-        print_var!(S3);
-        print_var!(S4);
-        println!("");
 
         let S5 = &S1 + &S2;
         let S6 = &S1 - &S2;
         let S7 = &S3 + &S3;
         let S8 = &S7 + &S6;
         let S9 = &S5 - &S4;
-        print_var!(S5);
-        print_var!(S6);
-        print_var!(S7);
-        print_var!(S8);
-        print_var!(S9);
-        println!("");
-
-        let X3 = &S8 * &S9;
-        let Y3 = &S5 * &S6;
-        let Z3 = &S8 * &S6;
-        let T3 = &S5 * &S9;
 
         edwards::EdwardsPoint {
-            X: X3,
-            Y: Y3,
-            Z: Z3,
-            T: T3,
+            X: &S8 * &S9,
+            Y: &S5 * &S6,
+            Z: &S8 * &S6,
+            T: &S5 * &S9,
         }
     }
 
-    fn doubling_test_helper(P: edwards::EdwardsPoint) {
-        let R1: edwards::EdwardsPoint = serial_double(P.into()).into();
-        let R2: edwards::EdwardsPoint = ExtendedPoint::from(P).double().into();
-        println!("Testing point doubling:");
-        println!("P = {:?}", P);
-        println!("(serial) R1 = {:?}", R1);
-        println!("(vector) R2 = {:?}", R2);
-        println!("P + P = {:?}", &P + &P);
-        assert_eq!(R1.compress(), (&P + &P).compress());
-        assert_eq!(R2.compress(), (&P + &P).compress());
-        println!("OK!\n");
+    /// Check the serial formulas and the vector sum and difference against `EdwardsPoint`
+    fn check_addition(first: edwards::EdwardsPoint, second: edwards::EdwardsPoint) {
+        let cached_second = CachedPoint::from(ExtendedPoint::from(second));
+
+        let serial_sum = serial_add(first, second);
+        let vector_sum: edwards::EdwardsPoint =
+            (&ExtendedPoint::from(first) + &cached_second).into();
+        let vector_difference: edwards::EdwardsPoint =
+            (&ExtendedPoint::from(first) - &cached_second).into();
+
+        assert_eq!(serial_sum.compress(), (first + second).compress());
+        assert_eq!(vector_sum.compress(), (first + second).compress());
+        assert_eq!(vector_difference.compress(), (first - second).compress());
     }
 
-    #[test]
-    fn vector_doubling_vs_serial_doubling_vs_edwards_extendedpoint() {
-        use crate::constants;
-        use crate::scalar::Scalar;
+    /// Check the serial formulas and the vector double against `EdwardsPoint`
+    fn check_doubling(point: edwards::EdwardsPoint) {
+        let serial_double = serial_double(point);
+        let vector_double: edwards::EdwardsPoint = ExtendedPoint::from(point).double().into();
 
-        println!("Testing [2]id");
-        let P = edwards::EdwardsPoint::identity();
-        doubling_test_helper(P);
-
-        println!("Testing [2]B");
-        let P = constants::ED25519_BASEPOINT_POINT;
-        doubling_test_helper(P);
-
-        println!("Testing [2]([k]B)");
-        let P = constants::ED25519_BASEPOINT_TABLE * &Scalar::from(8475983829u64);
-        doubling_test_helper(P);
+        assert_eq!(serial_double.compress(), (point + point).compress());
+        assert_eq!(vector_double.compress(), (point + point).compress());
     }
 
+    // vector addition and subtraction agree with serial addition on identity and basepoint multiples
     #[test]
-    fn basepoint_odd_lookup_table_verify() {
-        use crate::backend::vector::avx2::constants::BASEPOINT_ODD_LOOKUP_TABLE;
-        use crate::constants;
+    fn addition() {
+        let identity = edwards::EdwardsPoint::identity();
+        let basepoint = curve_constants::ED25519_BASEPOINT_POINT;
+        let multiple = curve_constants::ED25519_BASEPOINT_TABLE * &Scalar::from(SAMPLE_SCALAR);
 
-        let basepoint_odd_table =
-            NafLookupTable8::<CachedPoint>::from(&constants::ED25519_BASEPOINT_POINT);
-        println!("basepoint_odd_lookup_table = {:?}", basepoint_odd_table);
+        check_addition(identity, identity);
+        check_addition(identity, basepoint);
+        check_addition(basepoint, basepoint);
+        check_addition(basepoint, multiple);
+    }
 
-        let table_B = &BASEPOINT_ODD_LOOKUP_TABLE;
-        for (b_vec, base_vec) in table_B.0.iter().zip(basepoint_odd_table.0.iter()) {
-            let b_splits = b_vec.0.split();
-            let base_splits = base_vec.0.split();
+    // vector doubling agrees with serial doubling on identity and basepoint multiples
+    #[test]
+    fn doubling() {
+        check_doubling(edwards::EdwardsPoint::identity());
+        check_doubling(curve_constants::ED25519_BASEPOINT_POINT);
+        check_doubling(curve_constants::ED25519_BASEPOINT_TABLE * &Scalar::from(SAMPLE_SCALAR));
+    }
 
-            assert_eq!(base_splits[0], b_splits[0]);
-            assert_eq!(base_splits[1], b_splits[1]);
-            assert_eq!(base_splits[2], b_splits[2]);
-            assert_eq!(base_splits[3], b_splits[3]);
+    // the static odd-multiples table matches one built at runtime
+    #[test]
+    fn basepoint_table() {
+        let runtime_table =
+            NafLookupTable8::<CachedPoint>::from(&curve_constants::ED25519_BASEPOINT_POINT);
+
+        for (static_entry, runtime_entry) in BASEPOINT_ODD_LOOKUP_TABLE
+            .0
+            .iter()
+            .zip(runtime_table.0.iter())
+        {
+            assert_eq!(runtime_entry.0.split(), static_entry.0.split());
         }
     }
 }

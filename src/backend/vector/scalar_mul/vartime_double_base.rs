@@ -26,15 +26,24 @@ pub mod spec {
     use crate::traits::Identity;
     use crate::window::NafLookupTable5;
 
+    /// The point table holds odd multiples up to 15
+    const A_NAF_WINDOW: usize = 5;
+
+    /// The static basepoint table holds odd multiples up to 127
+    const B_NAF_WINDOW: usize = 8;
+
+    /// A NAF of a scalar below 2^255 has this many digits
+    const NAF_LENGTH: usize = 256;
+
     /// Compute `aA + bB` in variable time, where `B` is the Ed25519 basepoint
     pub fn mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> EdwardsPoint {
-        let a_naf = a.non_adjacent_form(5);
+        let a_naf = a.non_adjacent_form(A_NAF_WINDOW);
 
-        let b_naf = b.non_adjacent_form(8);
+        let b_naf = b.non_adjacent_form(B_NAF_WINDOW);
 
         // Skip the leading positions where both digit schedules are zero
-        let mut i: usize = 255;
-        for j in (0..256).rev() {
+        let mut i: usize = NAF_LENGTH - 1;
+        for j in (0..NAF_LENGTH).rev() {
             i = j;
             if a_naf[i] != 0 || b_naf[i] != 0 {
                 break;

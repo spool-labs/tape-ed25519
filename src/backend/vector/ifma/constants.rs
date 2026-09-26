@@ -2,12 +2,10 @@
 
 // Vendored from curve25519-dalek, BSD-3-Clause
 
-use crate::backend::vector::packed_simd::u64x4;
-
-use crate::window::NafLookupTable8;
-
 use super::edwards::{CachedPoint, ExtendedPoint};
 use super::field::{F51x4Reduced, F51x4Unreduced};
+use crate::backend::vector::packed_simd::u64x4;
+use crate::window::NafLookupTable8;
 
 /// The identity element as an `ExtendedPoint`
 pub static EXTENDEDPOINT_IDENTITY: ExtendedPoint = ExtendedPoint(F51x4Unreduced([
@@ -4107,54 +4105,52 @@ pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLoo
 ]);
 
 #[cfg(all(test, target_feature = "avx512ifma"))]
-mod test {
+mod tests {
     use super::*;
     use crate::backend::serial::u64::field::FieldElement51;
-    use crate::constants as curve_constants;
+    use crate::constants::{ED25519_BASEPOINT_128_POINT, ED25519_BASEPOINT_POINT};
 
-    use crate::window::NafLookupTable8;
-
-    /// Assert that two projective `CachedPoint`s encode the same point by cross-multiplying the `C` lanes
-    fn assert_same_cached_point(s: &CachedPoint, r: &CachedPoint, i: usize) {
-        let [sa, sb, sc, sd] = F51x4Unreduced::from(s.0).split();
-        let [ra, rb, rc, rd] = F51x4Unreduced::from(r.0).split();
-
-        let eq = |x: &FieldElement51, y: &FieldElement51, what: &str| {
-            assert_eq!(x.to_bytes(), y.to_bytes(), "{what} mismatch at entry {i}");
-        };
-        eq(&(&sa * &rc), &(&ra * &sc), "A lane");
-        eq(&(&sb * &rc), &(&rb * &sc), "B lane");
-        eq(&(&sd * &rc), &(&rd * &sc), "D lane");
+    fn assert_same_coordinate(left: &FieldElement51, right: &FieldElement51, entry: usize) {
+        assert_eq!(
+            left.to_bytes(),
+            right.to_bytes(),
+            "mismatch at entry {entry}"
+        );
     }
 
-    // the static B' table encodes the same points a runtime-built one does
-    #[test]
-    fn basepoint_128_odd_lookup_table_matches_runtime_generation() {
-        let runtime =
-            NafLookupTable8::<CachedPoint>::from(&curve_constants::ED25519_BASEPOINT_128_POINT);
+    // Projective points are equal when the lanes agree after cross-multiplying by the C lanes
+    fn assert_same_cached_point(stored: &CachedPoint, built: &CachedPoint, entry: usize) {
+        let [stored_a, stored_b, stored_c, stored_d] = F51x4Unreduced::from(stored.0).split();
+        let [built_a, built_b, built_c, built_d] = F51x4Unreduced::from(built.0).split();
 
-        for (i, (static_point, runtime_point)) in BASEPOINT_128_ODD_LOOKUP_TABLE
-            .0
-            .iter()
-            .zip(runtime.0.iter())
-            .enumerate()
+        assert_same_coordinate(&(&stored_a * &built_c), &(&built_a * &stored_c), entry);
+        assert_same_coordinate(&(&stored_b * &built_c), &(&built_b * &stored_c), entry);
+        assert_same_coordinate(&(&stored_d * &built_c), &(&built_d * &stored_c), entry);
+    }
+
+    fn assert_same_table(
+        stored: &NafLookupTable8<CachedPoint>,
+        built: &NafLookupTable8<CachedPoint>,
+    ) {
+        for (entry, (stored_point, built_point)) in stored.0.iter().zip(built.0.iter()).enumerate()
         {
-            assert_same_cached_point(static_point, runtime_point, i);
+            assert_same_cached_point(stored_point, built_point, entry);
         }
     }
 
+    // the static B' table encodes the same points as a table built at run time
     #[test]
-    fn basepoint_odd_lookup_table_matches_runtime_generation() {
-        let runtime =
-            NafLookupTable8::<CachedPoint>::from(&curve_constants::ED25519_BASEPOINT_POINT);
+    fn shifted_basepoint() {
+        let built = NafLookupTable8::<CachedPoint>::from(&ED25519_BASEPOINT_128_POINT);
 
-        for (i, (static_point, runtime_point)) in BASEPOINT_ODD_LOOKUP_TABLE
-            .0
-            .iter()
-            .zip(runtime.0.iter())
-            .enumerate()
-        {
-            assert_same_cached_point(static_point, runtime_point, i);
-        }
+        assert_same_table(&BASEPOINT_128_ODD_LOOKUP_TABLE, &built);
+    }
+
+    // the static B table encodes the same points as a table built at run time
+    #[test]
+    fn basepoint() {
+        let built = NafLookupTable8::<CachedPoint>::from(&ED25519_BASEPOINT_POINT);
+
+        assert_same_table(&BASEPOINT_ODD_LOOKUP_TABLE, &built);
     }
 }

@@ -18,14 +18,20 @@ pub mod spec {
     use crate::traits::Identity;
     use crate::window::LookupTable;
 
+    /// Signed radix-16 digits in a scalar below 2^255
+    const DIGIT_COUNT: usize = 64;
+
+    /// Doublings per radix-16 digit
+    const DIGIT_BITS: u32 = 4;
+
     /// Multiply `point` by `scalar` in constant time
     pub fn mul(point: &EdwardsPoint, scalar: &Scalar) -> EdwardsPoint {
         let lookup_table = LookupTable::<CachedPoint>::from(point);
         let scalar_digits = scalar.as_radix_16();
         // Horner's rule over the signed radix-16 digits, top digit first
         let mut Q = ExtendedPoint::identity();
-        for i in (0..64).rev() {
-            Q = Q.mul_by_pow_2(4);
+        for i in (0..DIGIT_COUNT).rev() {
+            Q = Q.mul_by_pow_2(DIGIT_BITS);
             Q = &Q + &lookup_table.select(scalar_digits[i]);
         }
         Q.into()

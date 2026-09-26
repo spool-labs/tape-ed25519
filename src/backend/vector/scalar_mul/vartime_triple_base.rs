@@ -29,17 +29,20 @@ pub mod spec {
     use crate::edwards::EdwardsPoint;
     use crate::heea::HEEA_MAX_INDEX;
     use crate::scalar::Scalar;
-    #[allow(unused_imports)]
     use crate::traits::Identity;
-    use crate::window::NafLookupTable5;
-    use crate::window::NafLookupTable8;
+    use crate::window::{NafLookupTable5, NafLookupTable8};
 
+    /// The tables built per call for A1 and A2 are width 5
     const DYNAMIC_NAF_WINDOW: usize = 5;
 
-    // The static basepoint tables are width 8, so both halves of the basepoint scalar use width-8 digits
+    /// The static B table is width 8
     const B_LO_NAF_WINDOW: usize = 8;
 
+    /// The static B' table is width 8
     const B_HI_NAF_WINDOW: usize = 8;
+
+    /// Bytes in each 128-bit half of b
+    const HALF_LENGTH: usize = 16;
 
     /// Compute `a1 A1 + a2 A2 + b B` in variable time for `a1` and `a2` below 2^128
     pub fn mul_128_128_256_prechecked(
@@ -55,8 +58,8 @@ pub mod spec {
         let mut b_lo_bytes = [0u8; 32];
         let mut b_hi_bytes = [0u8; 32];
 
-        b_lo_bytes[..16].copy_from_slice(&b_bytes[..16]);
-        b_hi_bytes[..16].copy_from_slice(&b_bytes[16..]);
+        b_lo_bytes[..HALF_LENGTH].copy_from_slice(&b_bytes[..HALF_LENGTH]);
+        b_hi_bytes[..HALF_LENGTH].copy_from_slice(&b_bytes[HALF_LENGTH..]);
 
         let b_lo = Scalar::from_canonical_bytes_unchecked(b_lo_bytes);
         let b_hi = Scalar::from_canonical_bytes_unchecked(b_hi_bytes);
@@ -157,15 +160,16 @@ pub mod spec {
         let mut b_lo_bytes = [0u8; 32];
         let mut b_hi_bytes = [0u8; 32];
 
-        b_lo_bytes[..16].copy_from_slice(&b_bytes[..16]);
-        b_hi_bytes[..16].copy_from_slice(&b_bytes[16..]);
+        b_lo_bytes[..HALF_LENGTH].copy_from_slice(&b_bytes[..HALF_LENGTH]);
+        b_hi_bytes[..HALF_LENGTH].copy_from_slice(&b_bytes[HALF_LENGTH..]);
 
         let b_lo = Scalar::from_canonical_bytes_unchecked(b_lo_bytes);
         let b_hi = Scalar::from_canonical_bytes_unchecked(b_hi_bytes);
 
-        // The a2 digits are width 8 to match the prebuilt table
         let a1_naf = a1.non_adjacent_form_128(DYNAMIC_NAF_WINDOW);
-        let mut a2_naf = a2.non_adjacent_form_128(8);
+        // The prebuilt A2 table is width 8
+        const PREPARED_NAF_WINDOW: usize = 8;
+        let mut a2_naf = a2.non_adjacent_form_128(PREPARED_NAF_WINDOW);
         if negate_A2 {
             // Digits are odd with magnitude at most 127, so negation cannot overflow
             for digit in a2_naf.iter_mut() {
@@ -247,119 +251,150 @@ pub mod spec {
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
-mod test {
+mod tests {
     use super::{spec_avx2, spec_avx512ifma_avx512vl};
-    use crate::backend::serial;
-    use crate::constants;
+    use crate::backend::serial::scalar_mul::vartime_triple_base;
+    use crate::constants::ED25519_BASEPOINT_POINT;
+    use crate::edwards::EdwardsPoint;
     use crate::scalar::Scalar;
 
-    fn scalar_from_low_128(low: [u8; 16]) -> Scalar {
+    const HALF_LENGTH: usize = 16;
+
+    /// Scalars and points for one triple-base multiplication
+    struct Case {
+        first_scalar: Scalar,
+        first_point: EdwardsPoint,
+        second_scalar: Scalar,
+        second_point: EdwardsPoint,
+        base_scalar: Scalar,
+    }
+
+    fn scalar_from_low_half(low: [u8; HALF_LENGTH]) -> Scalar {
         let mut bytes = [0u8; 32];
-        bytes[..16].copy_from_slice(&low);
+        bytes[..HALF_LENGTH].copy_from_slice(&low);
         Scalar::from_canonical_bytes(bytes).expect("a 128-bit scalar is canonical")
     }
 
+    fn fixed_case() -> Case {
+        Case {
+            first_scalar: scalar_from_low_half([
+                0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
+                0x11, 0x00,
+            ]),
+            first_point: ED25519_BASEPOINT_POINT * Scalar::from(31u64),
+            second_scalar: scalar_from_low_half([
+                0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe, 0x0f, 0x1e, 0x2d, 0x3c, 0x4b, 0x5a,
+                0x69, 0x78,
+            ]),
+            second_point: ED25519_BASEPOINT_POINT * Scalar::from(37u64),
+            base_scalar: Scalar::from_bytes_mod_order([
+                0x42, 0x91, 0x0a, 0xbe, 0xef, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+                0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+                0x10, 0x20, 0x30, 0x40,
+            ]),
+        }
+    }
+
+    fn serial_result(case: &Case) -> EdwardsPoint {
+        vartime_triple_base::mul_128_128_256_prechecked(
+            &case.first_scalar,
+            &case.first_point,
+            &case.second_scalar,
+            &case.second_point,
+            &case.base_scalar,
+        )
+    }
+
+    fn naive_result(case: &Case) -> EdwardsPoint {
+        (case.first_scalar * case.first_point + case.second_scalar * case.second_point)
+            + case.base_scalar * ED25519_BASEPOINT_POINT
+    }
+
+    fn has_ifma() -> bool {
+        std::is_x86_feature_detected!("avx512ifma") && std::is_x86_feature_detected!("avx512vl")
+    }
+
+    // the AVX2 triple-base multiplication matches the serial and naive results
     #[test]
-    fn avx2_triple_base_matches_serial_and_naive() {
+    fn avx2() {
         if !std::is_x86_feature_detected!("avx2") {
             return;
         }
+        let case = fixed_case();
 
-        let a1 = scalar_from_low_128([
-            0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
-            0x11, 0x00,
-        ]);
-        let a2 = scalar_from_low_128([
-            0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe, 0x0f, 0x1e, 0x2d, 0x3c, 0x4b, 0x5a,
-            0x69, 0x78,
-        ]);
-        let b = Scalar::from_bytes_mod_order([
-            0x42, 0x91, 0x0a, 0xbe, 0xef, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
-            0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
-            0x10, 0x20, 0x30, 0x40,
-        ]);
-
-        let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(31u64);
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(37u64);
-
-        let avx2 = spec_avx2::mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-        let serial = serial::scalar_mul::vartime_triple_base::mul_128_128_256_prechecked(
-            &a1, &A1, &a2, &A2, &b,
+        let result = spec_avx2::mul_128_128_256_prechecked(
+            &case.first_scalar,
+            &case.first_point,
+            &case.second_scalar,
+            &case.second_point,
+            &case.base_scalar,
         );
-        let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
 
-        assert_eq!(avx2, serial);
-        assert_eq!(avx2, expected);
+        assert_eq!(result, serial_result(&case));
+        assert_eq!(result, naive_result(&case));
     }
 
-    // the AVX-512 triple-base multiply matches the serial and naive results
+    // the AVX-512 triple-base multiplication matches the serial and naive results
     #[test]
-    fn avx512_triple_base_matches_serial_and_naive() {
-        if !std::is_x86_feature_detected!("avx512ifma")
-            || !std::is_x86_feature_detected!("avx512vl")
-        {
+    fn avx512() {
+        if !has_ifma() {
             return;
         }
+        let case = fixed_case();
 
-        let a1 = scalar_from_low_128([
-            0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
-            0x11, 0x00,
-        ]);
-        let a2 = scalar_from_low_128([
-            0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe, 0x0f, 0x1e, 0x2d, 0x3c, 0x4b, 0x5a,
-            0x69, 0x78,
-        ]);
-        let b = Scalar::from_bytes_mod_order([
-            0x42, 0x91, 0x0a, 0xbe, 0xef, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
-            0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
-            0x10, 0x20, 0x30, 0x40,
-        ]);
-
-        let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(31u64);
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(37u64);
-
-        let ifma = spec_avx512ifma_avx512vl::mul_128_128_256_prechecked(&a1, &A1, &a2, &A2, &b);
-        let serial = serial::scalar_mul::vartime_triple_base::mul_128_128_256_prechecked(
-            &a1, &A1, &a2, &A2, &b,
+        let result = spec_avx512ifma_avx512vl::mul_128_128_256_prechecked(
+            &case.first_scalar,
+            &case.first_point,
+            &case.second_scalar,
+            &case.second_point,
+            &case.base_scalar,
         );
-        let expected = (a1 * A1 + a2 * A2) + b * constants::ED25519_BASEPOINT_POINT;
 
-        assert_eq!(ifma, serial);
-        assert_eq!(ifma, expected);
+        assert_eq!(result, serial_result(&case));
+        assert_eq!(result, naive_result(&case));
     }
 
-    // a prepared A2 table gives the same result as passing the point
+    // a prepared second-point table gives the same result as passing the point, for both signs
     #[test]
-    fn avx512_prepared_triple_base_matches_unprepared() {
-        if !std::is_x86_feature_detected!("avx512ifma")
-            || !std::is_x86_feature_detected!("avx512vl")
-        {
+    fn prepared() {
+        if !has_ifma() {
             return;
         }
-
-        let a1 = scalar_from_low_128([
+        let first_scalar = scalar_from_low_half([
             0x21, 0x43, 0x65, 0x87, 0xa9, 0xcb, 0xed, 0x0f, 0xf0, 0xe1, 0xd2, 0xc3, 0xb4, 0xa5,
             0x96, 0x07,
         ]);
-        let a2 = scalar_from_low_128([
+        let second_scalar = scalar_from_low_half([
             0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
             0x0f, 0x10,
         ]);
-        let b = Scalar::from_bytes_mod_order([0x5Au8; 32]);
+        let base_scalar = Scalar::from_bytes_mod_order([0x5Au8; 32]);
+        let first_point = ED25519_BASEPOINT_POINT * Scalar::from(41u64);
+        let second_point = ED25519_BASEPOINT_POINT * Scalar::from(43u64);
+        let second_table = spec_avx512ifma_avx512vl::build_prepared_a2_table(&second_point);
 
-        let A1 = constants::ED25519_BASEPOINT_POINT * Scalar::from(41u64);
-        let A2 = constants::ED25519_BASEPOINT_POINT * Scalar::from(43u64);
-
-        let table_A2 = spec_avx512ifma_avx512vl::build_prepared_a2_table(&A2);
-
-        for negate in [false, true] {
+        for should_negate in [false, true] {
             let prepared = spec_avx512ifma_avx512vl::mul_128_128_256_prechecked_prepared(
-                &a1, &A1, &a2, &table_A2, negate, &b,
+                &first_scalar,
+                &first_point,
+                &second_scalar,
+                &second_table,
+                should_negate,
+                &base_scalar,
             );
-            let A2_signed = if negate { -A2 } else { A2 };
-            let unprepared =
-                spec_avx512ifma_avx512vl::mul_128_128_256_prechecked(&a1, &A1, &a2, &A2_signed, &b);
-            assert_eq!(prepared, unprepared, "negate = {negate}");
+            let signed_point = match should_negate {
+                true => -second_point,
+                false => second_point,
+            };
+            let unprepared = spec_avx512ifma_avx512vl::mul_128_128_256_prechecked(
+                &first_scalar,
+                &first_point,
+                &second_scalar,
+                &signed_point,
+                &base_scalar,
+            );
+
+            assert_eq!(prepared, unprepared, "should_negate = {should_negate}");
         }
     }
 }

@@ -37,10 +37,10 @@ macro_rules! impl_shared {
             #[inline]
             fn eq(&self, rhs: &$ty) -> bool {
                 unsafe {
-                    let m = core::arch::x86_64::_mm256_cmpeq_epi8(self.0, rhs.0);
+                    let mask = core::arch::x86_64::_mm256_cmpeq_epi8(self.0, rhs.0);
 
                     // Every byte matched when all 32 byte masks are set, which reads as -1
-                    core::arch::x86_64::_mm256_movemask_epi8(m) == -1
+                    core::arch::x86_64::_mm256_movemask_epi8(mask) == -1
                 }
             }
         }

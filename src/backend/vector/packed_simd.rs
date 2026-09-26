@@ -33,10 +33,14 @@ impl_conv!(u64x4 => u32x8);
 impl u64x4 {
     /// Build a vector in a `const` context
     #[inline]
-    pub const fn new_const(x0: u64, x1: u64, x2: u64, x3: u64) -> Self {
+    pub const fn new_const(lane0: u64, lane1: u64, lane2: u64, lane3: u64) -> Self {
         // SAFETY: the array and the vector have the same size and every bit pattern is valid
         unsafe {
-            Self(core::mem::transmute::<[u64; 4], core::arch::x86_64::__m256i>([x0, x1, x2, x3]))
+            Self(
+                core::mem::transmute::<[u64; 4], core::arch::x86_64::__m256i>([
+                    lane0, lane1, lane2, lane3,
+                ]),
+            )
         }
     }
 
@@ -49,11 +53,14 @@ impl u64x4 {
     /// Build a vector from its lanes, low lane first
     #[unsafe_target_feature("avx2")]
     #[inline]
-    pub fn new(x0: u64, x1: u64, x2: u64, x3: u64) -> u64x4 {
+    pub fn new(lane0: u64, lane1: u64, lane2: u64, lane3: u64) -> u64x4 {
         unsafe {
             // The intrinsic takes its lanes high first
             u64x4(core::arch::x86_64::_mm256_set_epi64x(
-                x3 as i64, x2 as i64, x1 as i64, x0 as i64,
+                lane3 as i64,
+                lane2 as i64,
+                lane1 as i64,
+                lane0 as i64,
             ))
         }
     }
@@ -61,8 +68,8 @@ impl u64x4 {
     /// Broadcast one value to every lane
     #[unsafe_target_feature("avx2")]
     #[inline]
-    pub fn splat(x: u64) -> u64x4 {
-        unsafe { u64x4(core::arch::x86_64::_mm256_set1_epi64x(x as i64)) }
+    pub fn splat(value: u64) -> u64x4 {
+        unsafe { u64x4(core::arch::x86_64::_mm256_set1_epi64x(value as i64)) }
     }
 }
 
@@ -71,20 +78,20 @@ impl u32x8 {
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub const fn new_const(
-        x0: u32,
-        x1: u32,
-        x2: u32,
-        x3: u32,
-        x4: u32,
-        x5: u32,
-        x6: u32,
-        x7: u32,
+        lane0: u32,
+        lane1: u32,
+        lane2: u32,
+        lane3: u32,
+        lane4: u32,
+        lane5: u32,
+        lane6: u32,
+        lane7: u32,
     ) -> Self {
         // SAFETY: the array and the vector have the same size and every bit pattern is valid
         unsafe {
             Self(
                 core::mem::transmute::<[u32; 8], core::arch::x86_64::__m256i>([
-                    x0, x1, x2, x3, x4, x5, x6, x7,
+                    lane0, lane1, lane2, lane3, lane4, lane5, lane6, lane7,
                 ]),
             )
         }
@@ -100,12 +107,27 @@ impl u32x8 {
     #[allow(clippy::too_many_arguments)]
     #[unsafe_target_feature("avx2")]
     #[inline]
-    pub fn new(x0: u32, x1: u32, x2: u32, x3: u32, x4: u32, x5: u32, x6: u32, x7: u32) -> u32x8 {
+    pub fn new(
+        lane0: u32,
+        lane1: u32,
+        lane2: u32,
+        lane3: u32,
+        lane4: u32,
+        lane5: u32,
+        lane6: u32,
+        lane7: u32,
+    ) -> u32x8 {
         unsafe {
             // The intrinsic takes its lanes high first
             u32x8(core::arch::x86_64::_mm256_set_epi32(
-                x7 as i32, x6 as i32, x5 as i32, x4 as i32, x3 as i32, x2 as i32, x1 as i32,
-                x0 as i32,
+                lane7 as i32,
+                lane6 as i32,
+                lane5 as i32,
+                lane4 as i32,
+                lane3 as i32,
+                lane2 as i32,
+                lane1 as i32,
+                lane0 as i32,
             ))
         }
     }
@@ -113,8 +135,8 @@ impl u32x8 {
     /// Broadcast one value to every lane
     #[unsafe_target_feature("avx2")]
     #[inline]
-    pub fn splat(x: u32) -> u32x8 {
-        unsafe { u32x8(core::arch::x86_64::_mm256_set1_epi32(x as i32)) }
+    pub fn splat(value: u32) -> u32x8 {
+        unsafe { u32x8(core::arch::x86_64::_mm256_set1_epi32(value as i32)) }
     }
 }
 

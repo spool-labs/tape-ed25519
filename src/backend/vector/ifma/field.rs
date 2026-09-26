@@ -6,12 +6,13 @@
 #![allow(unused_unsafe)]
 #![allow(non_snake_case)]
 
-use crate::backend::vector::packed_simd::u64x4;
 use core::ops::{Add, Mul, Neg};
 
-use crate::backend::serial::u64::field::FieldElement51;
-
 use curve25519_dalek_derive::unsafe_target_feature;
+use subtle::{Choice, ConditionallySelectable};
+
+use crate::backend::serial::u64::field::FieldElement51;
+use crate::backend::vector::packed_simd::u64x4;
 
 /// Run `vpmadd52luq` on `u64x4` values
 #[unsafe_target_feature("avx512ifma,avx512vl")]
@@ -208,9 +209,6 @@ impl Neg for F51x4Reduced {
         F51x4Unreduced::from(self).negate_lazy().into()
     }
 }
-
-use subtle::Choice;
-use subtle::ConditionallySelectable;
 
 #[unsafe_target_feature("avx512ifma,avx512vl")]
 impl ConditionallySelectable for F51x4Reduced {
@@ -609,212 +607,217 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
 
 #[cfg(all(target_feature = "avx512ifma", target_feature = "avx512vl"))]
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
-    #[test]
-    fn vpmadd52luq() {
-        let x = u64x4::splat(2);
-        let y = u64x4::splat(3);
-        let mut z = u64x4::splat(5);
+    const ROUNDS: usize = 1024;
+    const LANE_COUNT: usize = 4;
+    const SCALE_SHIFT: u32 = 4;
+    const SMALL_CONSTANT: u32 = 121665;
 
-        z = unsafe { madd52lo(z, x, y) };
-
-        assert_eq!(z, u64x4::splat(5 + 2 * 3));
+    // Inverting a small element gives one with full-size limbs
+    fn big_element() -> FieldElement51 {
+        FieldElement51([2438, 24, 243, 0, 0]).invert()
     }
 
-    #[test]
-    fn new_split_round_trip_on_reduced_input() {
-        // Invert a small field element to get a big one
-        let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-
-        let ax4 = F51x4Unreduced::new(&a, &a, &a, &a);
-        let splits = ax4.split();
-
-        for i in 0..4 {
-            assert_eq!(a, splits[i]);
-        }
+    fn other_big_element() -> FieldElement51 {
+        FieldElement51([98098, 87987897, 0, 1, 0]).invert()
     }
 
-    #[test]
-    fn new_split_round_trip_on_unreduced_input() {
-        // Invert a small field element to get a big one
-        let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-        // Scale it by 16 without reducing the limbs
-        let a16 = FieldElement51([
-            a.0[0] << 4,
-            a.0[1] << 4,
-            a.0[2] << 4,
-            a.0[3] << 4,
-            a.0[4] << 4,
-        ]);
-
-        let a16x4 = F51x4Unreduced::new(&a16, &a16, &a16, &a16);
-        let splits = a16x4.split();
-
-        for i in 0..4 {
-            assert_eq!(a16, splits[i]);
-        }
+    fn scaled_unreduced(element: &FieldElement51) -> FieldElement51 {
+        FieldElement51([
+            element.0[0] << SCALE_SHIFT,
+            element.0[1] << SCALE_SHIFT,
+            element.0[2] << SCALE_SHIFT,
+            element.0[3] << SCALE_SHIFT,
+            element.0[4] << SCALE_SHIFT,
+        ])
     }
 
+    fn splat(element: &FieldElement51) -> F51x4Unreduced {
+        F51x4Unreduced::new(element, element, element, element)
+    }
+
+    fn distinct_elements() -> [FieldElement51; LANE_COUNT] {
+        [
+            FieldElement51::from_bytes(&[0x10; 32]),
+            FieldElement51::from_bytes(&[0x11; 32]),
+            FieldElement51::from_bytes(&[0x12; 32]),
+            FieldElement51::from_bytes(&[0x13; 32]),
+        ]
+    }
+
+    // the vpmadd52luq wrapper adds the low product to the accumulator
     #[test]
-    fn test_reduction() {
-        // Invert a small field element to get a big one
-        let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-        // Scale it by 16 without reducing the limbs
-        let abig = FieldElement51([
-            a.0[0] << 4,
-            a.0[1] << 4,
-            a.0[2] << 4,
-            a.0[3] << 4,
-            a.0[4] << 4,
-        ]);
+    fn madd_low() {
+        let left = u64x4::splat(2);
+        let right = u64x4::splat(3);
+        let accumulator = u64x4::splat(5);
 
-        let abigx4: F51x4Reduced = F51x4Unreduced::new(&abig, &abig, &abig, &abig).into();
+        // SAFETY: the test module only compiles with avx512ifma and avx512vl enabled
+        let result = unsafe { madd52lo(accumulator, left, right) };
 
-        let splits = F51x4Unreduced::from(abigx4).split();
-        let c = &a * &FieldElement51([(1 << 4), 0, 0, 0, 0]);
+        assert_eq!(result, u64x4::splat(5 + 2 * 3));
+    }
 
-        for i in 0..4 {
-            assert_eq!(c, splits[i]);
+    // packing and splitting reduced limbs gives the inputs back
+    #[test]
+    fn split_reduced() {
+        let element = big_element();
+
+        let lanes = splat(&element).split();
+
+        for lane in lanes {
+            assert_eq!(element, lane);
         }
     }
 
+    // packing and splitting unreduced limbs gives the inputs back
     #[test]
-    fn mul_matches_serial() {
-        // Invert a small field element to get a big one
-        let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-        let b = FieldElement51([98098, 87987897, 0, 1, 0]).invert();
-        let c = &a * &b;
+    fn split_unreduced() {
+        let element = scaled_unreduced(&big_element());
 
-        let ax4: F51x4Reduced = F51x4Unreduced::new(&a, &a, &a, &a).into();
-        let bx4: F51x4Reduced = F51x4Unreduced::new(&b, &b, &b, &b).into();
-        let cx4 = &ax4 * &bx4;
+        let lanes = splat(&element).split();
 
-        let splits = cx4.split();
-
-        for i in 0..4 {
-            assert_eq!(c, splits[i]);
+        for lane in lanes {
+            assert_eq!(element, lane);
         }
     }
 
+    // reduction keeps the value of scaled unreduced limbs
     #[test]
-    fn iterated_mul_matches_serial() {
-        // Invert a small field element to get a big one
-        let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-        let b = FieldElement51([98098, 87987897, 0, 1, 0]).invert();
-        let mut c = &a * &b;
-        for _i in 0..1024 {
-            c = &a * &c;
-            c = &b * &c;
-        }
+    fn reduction() {
+        let element = big_element();
+        let scaled = scaled_unreduced(&element);
 
-        let ax4: F51x4Reduced = F51x4Unreduced::new(&a, &a, &a, &a).into();
-        let bx4: F51x4Reduced = F51x4Unreduced::new(&b, &b, &b, &b).into();
-        let mut cx4 = &ax4 * &bx4;
-        for _i in 0..1024 {
-            cx4 = &ax4 * &F51x4Reduced::from(cx4);
-            cx4 = &bx4 * &F51x4Reduced::from(cx4);
-        }
+        let reduced: F51x4Reduced = splat(&scaled).into();
+        let lanes = F51x4Unreduced::from(reduced).split();
+        let expected = &element * &FieldElement51([1 << SCALE_SHIFT, 0, 0, 0, 0]);
 
-        let splits = cx4.split();
-
-        for i in 0..4 {
-            assert_eq!(c, splits[i]);
+        for lane in lanes {
+            assert_eq!(expected, lane);
         }
     }
 
+    // one vector multiplication matches the serial product
     #[test]
-    fn square_matches_mul() {
-        // Invert a small field element to get a big one
-        let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
+    fn multiplication() {
+        let left = big_element();
+        let right = other_big_element();
+        let expected = &left * &right;
 
-        let ax4: F51x4Reduced = F51x4Unreduced::new(&a, &a, &a, &a).into();
-        let cx4 = &ax4 * &ax4;
-        let cx4_sq = ax4.square();
+        let left_vector: F51x4Reduced = splat(&left).into();
+        let right_vector: F51x4Reduced = splat(&right).into();
+        let lanes = (&left_vector * &right_vector).split();
 
-        let splits = cx4.split();
-        let splits_sq = cx4_sq.split();
-
-        for i in 0..4 {
-            assert_eq!(splits_sq[i], splits[i]);
+        for lane in lanes {
+            assert_eq!(expected, lane);
         }
     }
 
+    // a long chain of vector multiplications matches the serial chain
     #[test]
-    fn iterated_square_matches_serial() {
-        // Invert a small field element to get a big one
-        let mut a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-        let mut ax4 = F51x4Unreduced::new(&a, &a, &a, &a);
-        for _j in 0..1024 {
-            a = a.square();
-            ax4 = F51x4Reduced::from(ax4).square();
+    fn iterated_multiplication() {
+        let left = big_element();
+        let right = other_big_element();
+        let mut expected = &left * &right;
+        for _ in 0..ROUNDS {
+            expected = &left * &expected;
+            expected = &right * &expected;
+        }
 
-            let splits = ax4.split();
-            for i in 0..4 {
-                assert_eq!(a, splits[i]);
+        let left_vector: F51x4Reduced = splat(&left).into();
+        let right_vector: F51x4Reduced = splat(&right).into();
+        let mut product = &left_vector * &right_vector;
+        for _ in 0..ROUNDS {
+            product = &left_vector * &F51x4Reduced::from(product);
+            product = &right_vector * &F51x4Reduced::from(product);
+        }
+
+        for lane in product.split() {
+            assert_eq!(expected, lane);
+        }
+    }
+
+    // vector squaring matches vector multiplication by itself
+    #[test]
+    fn square() {
+        let vector: F51x4Reduced = splat(&big_element()).into();
+
+        let product = (&vector * &vector).split();
+        let squared = vector.square().split();
+
+        for lane in 0..LANE_COUNT {
+            assert_eq!(squared[lane], product[lane]);
+        }
+    }
+
+    // a long chain of vector squarings matches the serial chain
+    #[test]
+    fn iterated_square() {
+        let mut element = big_element();
+        let mut vector = splat(&element);
+        for _ in 0..ROUNDS {
+            element = element.square();
+            vector = F51x4Reduced::from(vector).square();
+
+            for lane in vector.split() {
+                assert_eq!(element, lane);
             }
         }
     }
 
+    // a long chain of multiplications by a small constant matches the serial chain
     #[test]
-    fn iterated_u32_mul_matches_serial() {
-        // Invert a small field element to get a big one
-        let a = FieldElement51([2438, 24, 243, 0, 0]).invert();
-        let b = FieldElement51([121665, 0, 0, 0, 0]);
-        let mut c = &a * &b;
-        for _i in 0..1024 {
-            c = &b * &c;
+    fn small_multiplication() {
+        let element = big_element();
+        let constant = FieldElement51([SMALL_CONSTANT as u64, 0, 0, 0, 0]);
+        let mut expected = &element * &constant;
+        for _ in 0..ROUNDS {
+            expected = &constant * &expected;
         }
 
-        let ax4 = F51x4Unreduced::new(&a, &a, &a, &a);
-        let bx4 = (121665u32, 121665u32, 121665u32, 121665u32);
-        let mut cx4 = &F51x4Reduced::from(ax4) * bx4;
-        for _i in 0..1024 {
-            cx4 = &F51x4Reduced::from(cx4) * bx4;
+        let constants = (
+            SMALL_CONSTANT,
+            SMALL_CONSTANT,
+            SMALL_CONSTANT,
+            SMALL_CONSTANT,
+        );
+        let mut product = &F51x4Reduced::from(splat(&element)) * constants;
+        for _ in 0..ROUNDS {
+            product = &F51x4Reduced::from(product) * constants;
         }
 
-        let splits = cx4.split();
-
-        for i in 0..4 {
-            assert_eq!(c, splits[i]);
+        for lane in product.split() {
+            assert_eq!(expected, lane);
         }
     }
 
+    // the AAAA shuffle copies lane A into every lane
     #[test]
-    fn shuffle_AAAA() {
-        let x0 = FieldElement51::from_bytes(&[0x10; 32]);
-        let x1 = FieldElement51::from_bytes(&[0x11; 32]);
-        let x2 = FieldElement51::from_bytes(&[0x12; 32]);
-        let x3 = FieldElement51::from_bytes(&[0x13; 32]);
+    fn shuffle() {
+        let elements = distinct_elements();
+        let vector = F51x4Unreduced::new(&elements[0], &elements[1], &elements[2], &elements[3]);
 
-        let x = F51x4Unreduced::new(&x0, &x1, &x2, &x3);
+        let lanes = vector.shuffle(Shuffle::AAAA).split();
 
-        let y = x.shuffle(Shuffle::AAAA);
-        let splits = y.split();
-
-        assert_eq!(splits[0], x0);
-        assert_eq!(splits[1], x0);
-        assert_eq!(splits[2], x0);
-        assert_eq!(splits[3], x0);
+        for lane in lanes {
+            assert_eq!(lane, elements[0]);
+        }
     }
 
+    // the AB blend takes lanes A and B from the second vector
     #[test]
-    fn blend_AB() {
-        let x0 = FieldElement51::from_bytes(&[0x10; 32]);
-        let x1 = FieldElement51::from_bytes(&[0x11; 32]);
-        let x2 = FieldElement51::from_bytes(&[0x12; 32]);
-        let x3 = FieldElement51::from_bytes(&[0x13; 32]);
+    fn blend() {
+        let elements = distinct_elements();
+        let first = F51x4Unreduced::new(&elements[0], &elements[1], &elements[2], &elements[3]);
+        let second = F51x4Unreduced::new(&elements[3], &elements[2], &elements[1], &elements[0]);
 
-        let x = F51x4Unreduced::new(&x0, &x1, &x2, &x3);
-        let z = F51x4Unreduced::new(&x3, &x2, &x1, &x0);
+        let lanes = first.blend(&second, Lanes::AB).split();
 
-        let y = x.blend(&z, Lanes::AB);
-        let splits = y.split();
-
-        assert_eq!(splits[0], x3);
-        assert_eq!(splits[1], x2);
-        assert_eq!(splits[2], x2);
-        assert_eq!(splits[3], x3);
+        assert_eq!(lanes[0], elements[3]);
+        assert_eq!(lanes[1], elements[2]);
+        assert_eq!(lanes[2], elements[2]);
+        assert_eq!(lanes[3], elements[3]);
     }
 }

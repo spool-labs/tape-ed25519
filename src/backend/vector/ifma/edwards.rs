@@ -4,22 +4,16 @@
 
 #![allow(non_snake_case)]
 
-use crate::traits::Identity;
-
 use core::ops::{Add, Neg, Sub};
 
-use subtle::Choice;
-use subtle::ConditionallySelectable;
-
 use curve25519_dalek_derive::unsafe_target_feature;
-
-use crate::edwards;
-use crate::window::{LookupTable, NafLookupTable5};
-
-use crate::window::NafLookupTable8;
+use subtle::{Choice, ConditionallySelectable};
 
 use super::constants;
 use super::field::{F51x4Reduced, F51x4Unreduced, Lanes, Shuffle};
+use crate::edwards;
+use crate::traits::Identity;
+use crate::window::{LookupTable, NafLookupTable5, NafLookupTable8};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ExtendedPoint(pub F51x4Unreduced);
@@ -232,78 +226,51 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable8<CachedPoint> {
 
 #[cfg(all(target_feature = "avx512ifma", target_feature = "avx512vl"))]
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
+    use crate::constants::{ED25519_BASEPOINT_POINT, ED25519_BASEPOINT_TABLE};
+    use crate::scalar::Scalar;
 
-    fn addition_test_helper(P: edwards::EdwardsPoint, Q: edwards::EdwardsPoint) {
-        let cached_Q = CachedPoint::from(ExtendedPoint::from(Q));
-        let R_vector: edwards::EdwardsPoint = (&ExtendedPoint::from(P) + &cached_Q).into();
-        let S_vector: edwards::EdwardsPoint = (&ExtendedPoint::from(P) - &cached_Q).into();
+    const MULTIPLIER: u64 = 8475983829;
 
-        println!("Testing point addition:");
-        println!("P = {:?}", P);
-        println!("Q = {:?}", Q);
-        println!("cached Q = {:?}", cached_Q);
-        println!("R = P + Q = {:?}", &P + &Q);
-        println!("R_vector = {:?}", R_vector);
-        println!("S = P - Q = {:?}", &P - &Q);
-        println!("S_vector = {:?}", S_vector);
-        assert_eq!(R_vector.compress(), (&P + &Q).compress());
-        assert_eq!(S_vector.compress(), (&P - &Q).compress());
-        println!("OK!\n");
+    fn sample_points() -> [edwards::EdwardsPoint; 3] {
+        [
+            edwards::EdwardsPoint::identity(),
+            ED25519_BASEPOINT_POINT,
+            ED25519_BASEPOINT_TABLE * &Scalar::from(MULTIPLIER),
+        ]
     }
 
+    fn check_addition(left: edwards::EdwardsPoint, right: edwards::EdwardsPoint) {
+        let cached = CachedPoint::from(ExtendedPoint::from(right));
+        let sum: edwards::EdwardsPoint = (&ExtendedPoint::from(left) + &cached).into();
+        let difference: edwards::EdwardsPoint = (&ExtendedPoint::from(left) - &cached).into();
+
+        assert_eq!(sum.compress(), (left + right).compress());
+        assert_eq!(difference.compress(), (left - right).compress());
+    }
+
+    fn check_doubling(point: edwards::EdwardsPoint) {
+        let doubled: edwards::EdwardsPoint = ExtendedPoint::from(point).double().into();
+
+        assert_eq!(doubled.compress(), (point + point).compress());
+    }
+
+    // vector addition and subtraction match the serial formulas on every pair of sample points
     #[test]
-    fn vector_addition_vs_serial_addition_vs_edwards_extendedpoint() {
-        use crate::constants;
-        use crate::scalar::Scalar;
-
-        println!("Testing id +- id");
-        let P = edwards::EdwardsPoint::identity();
-        let Q = edwards::EdwardsPoint::identity();
-        addition_test_helper(P, Q);
-
-        println!("Testing id +- B");
-        let P = edwards::EdwardsPoint::identity();
-        let Q = constants::ED25519_BASEPOINT_POINT;
-        addition_test_helper(P, Q);
-
-        println!("Testing B +- B");
-        let P = constants::ED25519_BASEPOINT_POINT;
-        let Q = constants::ED25519_BASEPOINT_POINT;
-        addition_test_helper(P, Q);
-
-        println!("Testing B +- kB");
-        let P = constants::ED25519_BASEPOINT_POINT;
-        let Q = constants::ED25519_BASEPOINT_TABLE * &Scalar::from(8475983829u64);
-        addition_test_helper(P, Q);
+    fn addition() {
+        for left in sample_points() {
+            for right in sample_points() {
+                check_addition(left, right);
+            }
+        }
     }
 
-    fn doubling_test_helper(P: edwards::EdwardsPoint) {
-        let R2: edwards::EdwardsPoint = ExtendedPoint::from(P).double().into();
-        println!("Testing point doubling:");
-        println!("P = {:?}", P);
-        println!("(vector) R2 = {:?}", R2);
-        println!("P + P = {:?}", &P + &P);
-        assert_eq!(R2.compress(), (&P + &P).compress());
-        println!("OK!\n");
-    }
-
+    // vector doubling matches serial addition of a point to itself
     #[test]
-    fn vector_doubling_vs_serial_doubling_vs_edwards_extendedpoint() {
-        use crate::constants;
-        use crate::scalar::Scalar;
-
-        println!("Testing [2]id");
-        let P = edwards::EdwardsPoint::identity();
-        doubling_test_helper(P);
-
-        println!("Testing [2]B");
-        let P = constants::ED25519_BASEPOINT_POINT;
-        doubling_test_helper(P);
-
-        println!("Testing [2]([k]B)");
-        let P = constants::ED25519_BASEPOINT_TABLE * &Scalar::from(8475983829u64);
-        doubling_test_helper(P);
+    fn doubling() {
+        for point in sample_points() {
+            check_doubling(point);
+        }
     }
 }

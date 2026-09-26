@@ -2,11 +2,9 @@
 
 // Vendored from curve25519-dalek, BSD-3-Clause
 
-use crate::backend::vector::packed_simd::u32x8;
-
 use crate::backend::vector::avx2::edwards::{CachedPoint, ExtendedPoint};
 use crate::backend::vector::avx2::field::FieldElement2625x4;
-
+use crate::backend::vector::packed_simd::u32x8;
 use crate::window::NafLookupTable8;
 
 /// The identity as an `ExtendedPoint`
@@ -1118,42 +1116,6 @@ pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLoo
         ),
     ])),
 ]);
-
-#[cfg(all(test, target_feature = "avx2"))]
-mod test {
-    use super::*;
-    use crate::backend::serial::u64::field::FieldElement51;
-    use crate::constants as curve_constants;
-
-    /// Assert that two projective `CachedPoint`s agree after cross-multiplying by their C lanes
-    fn assert_same_cached_point(s: &CachedPoint, r: &CachedPoint, i: usize) {
-        let [sa, sb, sc, sd] = s.0.split();
-        let [ra, rb, rc, rd] = r.0.split();
-
-        let eq = |x: &FieldElement51, y: &FieldElement51, what: &str| {
-            assert_eq!(x.to_bytes(), y.to_bytes(), "{what} mismatch at entry {i}");
-        };
-        eq(&(&sa * &rc), &(&ra * &sc), "A lane");
-        eq(&(&sb * &rc), &(&rb * &sc), "B lane");
-        eq(&(&sd * &rc), &(&rd * &sc), "D lane");
-    }
-
-    // the static B' table encodes the same points a runtime-built one does
-    #[test]
-    fn basepoint_128_odd_lookup_table_matches_runtime_generation() {
-        let runtime =
-            NafLookupTable8::<CachedPoint>::from(&curve_constants::ED25519_BASEPOINT_128_POINT);
-
-        for (i, (static_point, runtime_point)) in BASEPOINT_128_ODD_LOOKUP_TABLE
-            .0
-            .iter()
-            .zip(runtime.0.iter())
-            .enumerate()
-        {
-            assert_same_cached_point(static_point, runtime_point, i);
-        }
-    }
-}
 
 /// The lowest limb pair of 2p in every lane
 pub static P_TIMES_2_LO: u32x8 = u32x8::new_const(
@@ -2294,3 +2256,55 @@ pub static BASEPOINT_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLookupT
         ),
     ])),
 ]);
+
+#[cfg(all(test, target_feature = "avx2"))]
+mod tests {
+    use super::*;
+    use crate::backend::serial::u64::field::FieldElement51;
+    use crate::constants as curve_constants;
+
+    /// Assert that two projective `CachedPoint`s agree after cross-multiplying by their C lanes
+    fn assert_same_cached_point(stored: &CachedPoint, runtime: &CachedPoint, index: usize) {
+        let [stored_a, stored_b, stored_c, stored_d] = stored.0.split();
+        let [runtime_a, runtime_b, runtime_c, runtime_d] = runtime.0.split();
+
+        let assert_lane = |left: &FieldElement51, right: &FieldElement51, lane: &str| {
+            assert_eq!(
+                left.to_bytes(),
+                right.to_bytes(),
+                "{lane} mismatch at entry {index}"
+            );
+        };
+        assert_lane(
+            &(&stored_a * &runtime_c),
+            &(&runtime_a * &stored_c),
+            "A lane",
+        );
+        assert_lane(
+            &(&stored_b * &runtime_c),
+            &(&runtime_b * &stored_c),
+            "B lane",
+        );
+        assert_lane(
+            &(&stored_d * &runtime_c),
+            &(&runtime_d * &stored_c),
+            "D lane",
+        );
+    }
+
+    // the static B' table encodes the same points a runtime-built one does
+    #[test]
+    fn shifted_table() {
+        let runtime =
+            NafLookupTable8::<CachedPoint>::from(&curve_constants::ED25519_BASEPOINT_128_POINT);
+
+        for (index, (stored, built)) in BASEPOINT_128_ODD_LOOKUP_TABLE
+            .0
+            .iter()
+            .zip(runtime.0.iter())
+            .enumerate()
+        {
+            assert_same_cached_point(stored, built, index);
+        }
+    }
+}

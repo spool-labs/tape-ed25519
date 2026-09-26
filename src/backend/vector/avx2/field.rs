@@ -1,33 +1,35 @@
-//! Four field elements per AVX2 vector in 25.5-bit limbs, with bounds each caller keeps
+//! Four field elements per AVX2 vector in 25.5-bit limbs, and the caller keeps the limb bounds
 
 // Vendored from curve25519-dalek, BSD-3-Clause
 
 #![allow(unused_unsafe)]
 #![allow(non_snake_case)]
 
-const A_LANES: u8 = 0b0000_0101;
-const B_LANES: u8 = 0b0000_1010;
-const C_LANES: u8 = 0b0101_0000;
-const D_LANES: u8 = 0b1010_0000;
-
-#[allow(unused)]
-const A_LANES64: u8 = 0b00_00_00_11;
-#[allow(unused)]
-const B_LANES64: u8 = 0b00_00_11_00;
-#[allow(unused)]
-const C_LANES64: u8 = 0b00_11_00_00;
-#[allow(unused)]
-const D_LANES64: u8 = 0b11_00_00_00;
-
-use crate::backend::vector::packed_simd::{u32x8, u64x4};
 use core::ops::{Add, Mul, Neg};
+
+use curve25519_dalek_derive::unsafe_target_feature;
+use subtle::{Choice, ConditionallySelectable};
 
 use crate::backend::serial::u64::field::FieldElement51;
 use crate::backend::vector::avx2::constants::{
     P_TIMES_16_HI, P_TIMES_16_LO, P_TIMES_2_HI, P_TIMES_2_LO,
 };
+use crate::backend::vector::packed_simd::{u32x8, u64x4};
 
-use curve25519_dalek_derive::unsafe_target_feature;
+/// Blend mask for lane A in 32-bit words
+const A_LANES: u8 = 0b0000_0101;
+
+/// Blend mask for lane B in 32-bit words
+const B_LANES: u8 = 0b0000_1010;
+
+/// Blend mask for lane C in 32-bit words
+const C_LANES: u8 = 0b0101_0000;
+
+/// Blend mask for lane D in 32-bit words
+const D_LANES: u8 = 0b1010_0000;
+
+/// Blend mask for lane D in 64-bit words
+const D_LANES64: u8 = 0b11_00_00_00;
 
 /// Spread (a0, b0, a1, b1, c0, d0, c1, d1) into (a0, 0, b0, 0, ...) and (a1, 0, b1, 0, ...)
 #[unsafe_target_feature("avx2")]
@@ -37,8 +39,7 @@ fn unpack_pair(src: u32x8) -> (u32x8, u32x8) {
     let b: u32x8;
     let zero = u32x8::splat(0);
     unsafe {
-        use core::arch::x86_64::_mm256_unpackhi_epi32;
-        use core::arch::x86_64::_mm256_unpacklo_epi32;
+        use core::arch::x86_64::{_mm256_unpackhi_epi32, _mm256_unpacklo_epi32};
         a = _mm256_unpacklo_epi32(src.into(), zero.into()).into();
         b = _mm256_unpackhi_epi32(src.into(), zero.into()).into();
     }
@@ -50,8 +51,7 @@ fn unpack_pair(src: u32x8) -> (u32x8, u32x8) {
 #[inline(always)]
 fn repack_pair(x: u32x8, y: u32x8) -> u32x8 {
     unsafe {
-        use core::arch::x86_64::_mm256_blend_epi32;
-        use core::arch::x86_64::_mm256_shuffle_epi32;
+        use core::arch::x86_64::{_mm256_blend_epi32, _mm256_shuffle_epi32};
 
         let x_shuffled = _mm256_shuffle_epi32(x.into(), 0b11_01_10_00);
         let y_shuffled = _mm256_shuffle_epi32(y.into(), 0b10_00_11_01);
@@ -93,9 +93,6 @@ pub enum Shuffle {
 /// A vector of four field elements whose limb bounds the caller tracks
 #[derive(Clone, Copy, Debug)]
 pub struct FieldElement2625x4(pub [u32x8; 5]);
-
-use subtle::Choice;
-use subtle::ConditionallySelectable;
 
 #[unsafe_target_feature("avx2")]
 impl ConditionallySelectable for FieldElement2625x4 {
@@ -159,6 +156,7 @@ impl FieldElement2625x4 {
     pub fn shuffle(&self, control: Shuffle) -> FieldElement2625x4 {
         #[inline(always)]
         fn shuffle_lanes(x: u32x8, control: Shuffle) -> u32x8 {
+            // SAFETY: only the AVX2 `shuffle` calls this, so the host has AVX2
             unsafe {
                 use core::arch::x86_64::_mm256_permutevar8x32_epi32;
 
@@ -193,6 +191,7 @@ impl FieldElement2625x4 {
     pub fn blend(&self, other: FieldElement2625x4, control: Lanes) -> FieldElement2625x4 {
         #[inline(always)]
         fn blend_lanes(x: u32x8, y: u32x8, control: Lanes) -> u32x8 {
+            // SAFETY: only the AVX2 `blend` calls this, so the host has AVX2
             unsafe {
                 use core::arch::x86_64::_mm256_blend_epi32;
 
@@ -306,8 +305,7 @@ impl FieldElement2625x4 {
         // Each limb's overflow lands in the slot of the limb it feeds, and fits in 7 bits
         let rotated_carryout = |v: u32x8| -> u32x8 {
             unsafe {
-                use core::arch::x86_64::_mm256_shuffle_epi32;
-                use core::arch::x86_64::_mm256_srlv_epi32;
+                use core::arch::x86_64::{_mm256_shuffle_epi32, _mm256_srlv_epi32};
 
                 let c = _mm256_srlv_epi32(v.into(), shifts.into());
                 _mm256_shuffle_epi32(c, 0b01_00_11_10).into()
@@ -340,8 +338,7 @@ impl FieldElement2625x4 {
         v[4] = (v[4] & masks) + combine(c76, c98);
 
         let c9_19: u32x8 = unsafe {
-            use core::arch::x86_64::_mm256_mul_epu32;
-            use core::arch::x86_64::_mm256_shuffle_epi32;
+            use core::arch::x86_64::{_mm256_mul_epu32, _mm256_shuffle_epi32};
 
             // vpmuludq reads the low 32 bits of each 64-bit lane, so spread the top overflow first
             let c9_spread = _mm256_shuffle_epi32(c98.into(), 0b11_01_10_00);
@@ -627,112 +624,106 @@ impl Mul<&FieldElement2625x4> for &FieldElement2625x4 {
 
 #[cfg(target_feature = "avx2")]
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
-    #[test]
-    fn scale_by_curve_constants() {
-        let mut x = FieldElement2625x4::splat(&FieldElement51::ONE);
-
-        x = x * (121666, 121666, 2 * 121666, 2 * 121665);
-
-        let xs = x.split();
-        assert_eq!(xs[0], FieldElement51([121666, 0, 0, 0, 0]));
-        assert_eq!(xs[1], FieldElement51([121666, 0, 0, 0, 0]));
-        assert_eq!(xs[2], FieldElement51([2 * 121666, 0, 0, 0, 0]));
-        assert_eq!(xs[3], FieldElement51([2 * 121665, 0, 0, 0, 0]));
+    /// Four distinct unreduced field elements
+    fn sample_elements() -> [FieldElement51; 4] {
+        [
+            FieldElement51([10000, 10001, 10002, 10003, 10004]),
+            FieldElement51([10100, 10101, 10102, 10103, 10104]),
+            FieldElement51([10200, 10201, 10202, 10203, 10204]),
+            FieldElement51([10300, 10301, 10302, 10303, 10304]),
+        ]
     }
 
+    // multiplying by per-lane constants matches the serial products
     #[test]
-    fn diff_sum_vs_serial() {
-        let x0 = FieldElement51([10000, 10001, 10002, 10003, 10004]);
-        let x1 = FieldElement51([10100, 10101, 10102, 10103, 10104]);
-        let x2 = FieldElement51([10200, 10201, 10202, 10203, 10204]);
-        let x3 = FieldElement51([10300, 10301, 10302, 10303, 10304]);
+    fn scale_constants() {
+        let mut vector = FieldElement2625x4::splat(&FieldElement51::ONE);
 
-        let vec = FieldElement2625x4::new(&x0, &x1, &x2, &x3).diff_sum();
+        vector = vector * (121666, 121666, 2 * 121666, 2 * 121665);
 
-        let result = vec.split();
-
-        assert_eq!(result[0], &x1 - &x0);
-        assert_eq!(result[1], &x1 + &x0);
-        assert_eq!(result[2], &x3 - &x2);
-        assert_eq!(result[3], &x3 + &x2);
+        let lanes = vector.split();
+        assert_eq!(lanes[0], FieldElement51([121666, 0, 0, 0, 0]));
+        assert_eq!(lanes[1], FieldElement51([121666, 0, 0, 0, 0]));
+        assert_eq!(lanes[2], FieldElement51([2 * 121666, 0, 0, 0, 0]));
+        assert_eq!(lanes[3], FieldElement51([2 * 121665, 0, 0, 0, 0]));
     }
 
+    // diff_sum matches the serial differences and sums
     #[test]
-    fn square_vs_serial() {
-        let x0 = FieldElement51([10000, 10001, 10002, 10003, 10004]);
-        let x1 = FieldElement51([10100, 10101, 10102, 10103, 10104]);
-        let x2 = FieldElement51([10200, 10201, 10202, 10203, 10204]);
-        let x3 = FieldElement51([10300, 10301, 10302, 10303, 10304]);
+    fn diff_sum() {
+        let [first, second, third, fourth] = sample_elements();
+        let vector = FieldElement2625x4::new(&first, &second, &third, &fourth).diff_sum();
 
-        let vec = FieldElement2625x4::new(&x0, &x1, &x2, &x3);
+        let result = vector.split();
 
-        let result = vec.square_and_negate_D().split();
-
-        assert_eq!(result[0], &x0 * &x0);
-        assert_eq!(result[1], &x1 * &x1);
-        assert_eq!(result[2], &x2 * &x2);
-        assert_eq!(result[3], -&(&x3 * &x3));
+        assert_eq!(result[0], &second - &first);
+        assert_eq!(result[1], &second + &first);
+        assert_eq!(result[2], &fourth - &third);
+        assert_eq!(result[3], &fourth + &third);
     }
 
+    // squaring matches serial squares with lane D negated
     #[test]
-    fn multiply_vs_serial() {
-        let x0 = FieldElement51([10000, 10001, 10002, 10003, 10004]);
-        let x1 = FieldElement51([10100, 10101, 10102, 10103, 10104]);
-        let x2 = FieldElement51([10200, 10201, 10202, 10203, 10204]);
-        let x3 = FieldElement51([10300, 10301, 10302, 10303, 10304]);
+    fn square() {
+        let [first, second, third, fourth] = sample_elements();
+        let vector = FieldElement2625x4::new(&first, &second, &third, &fourth);
 
-        let vec = FieldElement2625x4::new(&x0, &x1, &x2, &x3);
-        let vecprime = vec.clone();
+        let result = vector.square_and_negate_D().split();
 
-        let result = (&vec * &vecprime).split();
-
-        assert_eq!(result[0], &x0 * &x0);
-        assert_eq!(result[1], &x1 * &x1);
-        assert_eq!(result[2], &x2 * &x2);
-        assert_eq!(result[3], &x3 * &x3);
+        assert_eq!(result[0], &first * &first);
+        assert_eq!(result[1], &second * &second);
+        assert_eq!(result[2], &third * &third);
+        assert_eq!(result[3], -&(&fourth * &fourth));
     }
 
+    // lane-wise multiplication matches serial multiplication
     #[test]
-    fn test_unpack_repack_pair() {
-        let x0 = FieldElement51([10000 + (10001 << 26), 0, 0, 0, 0]);
-        let x1 = FieldElement51([10100 + (10101 << 26), 0, 0, 0, 0]);
-        let x2 = FieldElement51([10200 + (10201 << 26), 0, 0, 0, 0]);
-        let x3 = FieldElement51([10300 + (10301 << 26), 0, 0, 0, 0]);
+    fn multiply() {
+        let [first, second, third, fourth] = sample_elements();
+        let vector = FieldElement2625x4::new(&first, &second, &third, &fourth);
+        let copy = vector;
 
-        let vec = FieldElement2625x4::new(&x0, &x1, &x2, &x3);
+        let result = (&vector * &copy).split();
 
-        let src = vec.0[0];
-
-        let (a, b) = unpack_pair(src);
-
-        let expected_a = u32x8::new(10000, 0, 10100, 0, 10200, 0, 10300, 0);
-        let expected_b = u32x8::new(10001, 0, 10101, 0, 10201, 0, 10301, 0);
-
-        assert_eq!(a, expected_a);
-        assert_eq!(b, expected_b);
-
-        let expected_src = repack_pair(a, b);
-
-        assert_eq!(src, expected_src);
+        assert_eq!(result[0], &first * &first);
+        assert_eq!(result[1], &second * &second);
+        assert_eq!(result[2], &third * &third);
+        assert_eq!(result[3], &fourth * &fourth);
     }
 
+    // unpacking a limb pair and repacking it gives back the input
     #[test]
-    fn new_split_roundtrips() {
-        let x0 = FieldElement51::from_bytes(&[0x10; 32]);
-        let x1 = FieldElement51::from_bytes(&[0x11; 32]);
-        let x2 = FieldElement51::from_bytes(&[0x12; 32]);
-        let x3 = FieldElement51::from_bytes(&[0x13; 32]);
+    fn unpack_repack() {
+        let first = FieldElement51([10000 + (10001 << 26), 0, 0, 0, 0]);
+        let second = FieldElement51([10100 + (10101 << 26), 0, 0, 0, 0]);
+        let third = FieldElement51([10200 + (10201 << 26), 0, 0, 0, 0]);
+        let fourth = FieldElement51([10300 + (10301 << 26), 0, 0, 0, 0]);
+        let vector = FieldElement2625x4::new(&first, &second, &third, &fourth);
+        let source = vector.0[0];
 
-        let vec = FieldElement2625x4::new(&x0, &x1, &x2, &x3);
+        let (low, high) = unpack_pair(source);
 
-        let splits = vec.split();
+        assert_eq!(low, u32x8::new(10000, 0, 10100, 0, 10200, 0, 10300, 0));
+        assert_eq!(high, u32x8::new(10001, 0, 10101, 0, 10201, 0, 10301, 0));
+        assert_eq!(source, repack_pair(low, high));
+    }
 
-        assert_eq!(x0, splits[0]);
-        assert_eq!(x1, splits[1]);
-        assert_eq!(x2, splits[2]);
-        assert_eq!(x3, splits[3]);
+    // packing four elements and splitting them gives back the inputs
+    #[test]
+    fn split_roundtrip() {
+        let first = FieldElement51::from_bytes(&[0x10; 32]);
+        let second = FieldElement51::from_bytes(&[0x11; 32]);
+        let third = FieldElement51::from_bytes(&[0x12; 32]);
+        let fourth = FieldElement51::from_bytes(&[0x13; 32]);
+
+        let lanes = FieldElement2625x4::new(&first, &second, &third, &fourth).split();
+
+        assert_eq!(first, lanes[0]);
+        assert_eq!(second, lanes[1]);
+        assert_eq!(third, lanes[2]);
+        assert_eq!(fourth, lanes[3]);
     }
 }
