@@ -622,10 +622,14 @@ impl Mul<&FieldElement2625x4> for &FieldElement2625x4 {
     }
 }
 
-#[cfg(target_feature = "avx2")]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whether this CPU runs the backend under test, so other hosts skip it
+    fn is_supported() -> bool {
+        std::is_x86_feature_detected!("avx2")
+    }
 
     /// Four distinct unreduced field elements
     fn sample_elements() -> [FieldElement51; 4] {
@@ -640,6 +644,9 @@ mod tests {
     // multiplying by per-lane constants matches the serial products
     #[test]
     fn scale_constants() {
+        if !is_supported() {
+            return;
+        }
         let mut vector = FieldElement2625x4::splat(&FieldElement51::ONE);
 
         vector = vector * (121666, 121666, 2 * 121666, 2 * 121665);
@@ -654,6 +661,9 @@ mod tests {
     // diff_sum matches the serial differences and sums
     #[test]
     fn diff_sum() {
+        if !is_supported() {
+            return;
+        }
         let [first, second, third, fourth] = sample_elements();
         let vector = FieldElement2625x4::new(&first, &second, &third, &fourth).diff_sum();
 
@@ -668,6 +678,9 @@ mod tests {
     // squaring matches serial squares with lane D negated
     #[test]
     fn square() {
+        if !is_supported() {
+            return;
+        }
         let [first, second, third, fourth] = sample_elements();
         let vector = FieldElement2625x4::new(&first, &second, &third, &fourth);
 
@@ -682,6 +695,9 @@ mod tests {
     // lane-wise multiplication matches serial multiplication
     #[test]
     fn multiply() {
+        if !is_supported() {
+            return;
+        }
         let [first, second, third, fourth] = sample_elements();
         let vector = FieldElement2625x4::new(&first, &second, &third, &fourth);
         let copy = vector;
@@ -697,6 +713,9 @@ mod tests {
     // unpacking a limb pair and repacking it gives back the input
     #[test]
     fn unpack_repack() {
+        if !is_supported() {
+            return;
+        }
         let first = FieldElement51([10000 + (10001 << 26), 0, 0, 0, 0]);
         let second = FieldElement51([10100 + (10101 << 26), 0, 0, 0, 0]);
         let third = FieldElement51([10200 + (10201 << 26), 0, 0, 0, 0]);
@@ -714,6 +733,9 @@ mod tests {
     // packing four elements and splitting them gives back the inputs
     #[test]
     fn split_roundtrip() {
+        if !is_supported() {
+            return;
+        }
         let first = FieldElement51::from_bytes(&[0x10; 32]);
         let second = FieldElement51::from_bytes(&[0x11; 32]);
         let third = FieldElement51::from_bytes(&[0x12; 32]);

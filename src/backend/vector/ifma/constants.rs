@@ -4104,11 +4104,16 @@ pub static BASEPOINT_128_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLoo
     ])),
 ]);
 
-#[cfg(all(test, target_feature = "avx512ifma"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::serial::u64::field::FieldElement51;
     use crate::constants::{ED25519_BASEPOINT_128_POINT, ED25519_BASEPOINT_POINT};
+
+    /// Whether this CPU runs the backend under test, so other hosts skip it
+    fn is_supported() -> bool {
+        std::is_x86_feature_detected!("avx512ifma") && std::is_x86_feature_detected!("avx512vl")
+    }
 
     fn assert_same_coordinate(left: &FieldElement51, right: &FieldElement51, entry: usize) {
         assert_eq!(
@@ -4141,6 +4146,9 @@ mod tests {
     // the static B' table encodes the same points as a table built at run time
     #[test]
     fn shifted_basepoint() {
+        if !is_supported() {
+            return;
+        }
         let built = NafLookupTable8::<CachedPoint>::from(&ED25519_BASEPOINT_128_POINT);
 
         assert_same_table(&BASEPOINT_128_ODD_LOOKUP_TABLE, &built);
@@ -4149,6 +4157,9 @@ mod tests {
     // the static B table encodes the same points as a table built at run time
     #[test]
     fn basepoint() {
+        if !is_supported() {
+            return;
+        }
         let built = NafLookupTable8::<CachedPoint>::from(&ED25519_BASEPOINT_POINT);
 
         assert_same_table(&BASEPOINT_ODD_LOOKUP_TABLE, &built);

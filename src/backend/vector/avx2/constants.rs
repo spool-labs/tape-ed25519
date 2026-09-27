@@ -2257,11 +2257,16 @@ pub static BASEPOINT_ODD_LOOKUP_TABLE: NafLookupTable8<CachedPoint> = NafLookupT
     ])),
 ]);
 
-#[cfg(all(test, target_feature = "avx2"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::serial::u64::field::FieldElement51;
     use crate::constants as curve_constants;
+
+    /// Whether this CPU runs the backend under test, so other hosts skip it
+    fn is_supported() -> bool {
+        std::is_x86_feature_detected!("avx2")
+    }
 
     /// Assert that two projective `CachedPoint`s agree after cross-multiplying by their C lanes
     fn assert_same_cached_point(stored: &CachedPoint, runtime: &CachedPoint, index: usize) {
@@ -2295,6 +2300,9 @@ mod tests {
     // the static B' table encodes the same points a runtime-built one does
     #[test]
     fn shifted_table() {
+        if !is_supported() {
+            return;
+        }
         let runtime =
             NafLookupTable8::<CachedPoint>::from(&curve_constants::ED25519_BASEPOINT_128_POINT);
 

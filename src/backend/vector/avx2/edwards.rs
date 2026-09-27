@@ -233,7 +233,6 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable8<CachedPoint> {
     }
 }
 
-#[cfg(target_feature = "avx2")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,6 +240,11 @@ mod tests {
     use crate::backend::vector::avx2::constants::BASEPOINT_ODD_LOOKUP_TABLE;
     use crate::constants as curve_constants;
     use crate::scalar::Scalar;
+
+    /// Whether this CPU runs the backend under test, so other hosts skip it
+    fn is_supported() -> bool {
+        std::is_x86_feature_detected!("avx2")
+    }
 
     /// A scalar for a basepoint multiple with a nontrivial Z
     const SAMPLE_SCALAR: u64 = 8475983829;
@@ -331,6 +335,9 @@ mod tests {
     // vector addition and subtraction agree with serial addition on identity and basepoint multiples
     #[test]
     fn addition() {
+        if !is_supported() {
+            return;
+        }
         let identity = edwards::EdwardsPoint::identity();
         let basepoint = curve_constants::ED25519_BASEPOINT_POINT;
         let multiple = curve_constants::ED25519_BASEPOINT_TABLE * &Scalar::from(SAMPLE_SCALAR);
@@ -344,6 +351,9 @@ mod tests {
     // vector doubling agrees with serial doubling on identity and basepoint multiples
     #[test]
     fn doubling() {
+        if !is_supported() {
+            return;
+        }
         check_doubling(edwards::EdwardsPoint::identity());
         check_doubling(curve_constants::ED25519_BASEPOINT_POINT);
         check_doubling(curve_constants::ED25519_BASEPOINT_TABLE * &Scalar::from(SAMPLE_SCALAR));
@@ -352,6 +362,9 @@ mod tests {
     // the static odd-multiples table matches one built at runtime
     #[test]
     fn basepoint_table() {
+        if !is_supported() {
+            return;
+        }
         let runtime_table =
             NafLookupTable8::<CachedPoint>::from(&curve_constants::ED25519_BASEPOINT_POINT);
 

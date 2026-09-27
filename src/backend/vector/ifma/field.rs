@@ -605,10 +605,14 @@ impl Mul<&F51x4Reduced> for &F51x4Reduced {
     }
 }
 
-#[cfg(all(target_feature = "avx512ifma", target_feature = "avx512vl"))]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whether this CPU runs the backend under test, so other hosts skip it
+    fn is_supported() -> bool {
+        std::is_x86_feature_detected!("avx512ifma") && std::is_x86_feature_detected!("avx512vl")
+    }
 
     const ROUNDS: usize = 1024;
     const LANE_COUNT: usize = 4;
@@ -650,6 +654,9 @@ mod tests {
     // the vpmadd52luq wrapper adds the low product to the accumulator
     #[test]
     fn madd_low() {
+        if !is_supported() {
+            return;
+        }
         let left = u64x4::splat(2);
         let right = u64x4::splat(3);
         let accumulator = u64x4::splat(5);
@@ -663,6 +670,9 @@ mod tests {
     // packing and splitting reduced limbs gives the inputs back
     #[test]
     fn split_reduced() {
+        if !is_supported() {
+            return;
+        }
         let element = big_element();
 
         let lanes = splat(&element).split();
@@ -675,6 +685,9 @@ mod tests {
     // packing and splitting unreduced limbs gives the inputs back
     #[test]
     fn split_unreduced() {
+        if !is_supported() {
+            return;
+        }
         let element = scaled_unreduced(&big_element());
 
         let lanes = splat(&element).split();
@@ -687,6 +700,9 @@ mod tests {
     // reduction keeps the value of scaled unreduced limbs
     #[test]
     fn reduction() {
+        if !is_supported() {
+            return;
+        }
         let element = big_element();
         let scaled = scaled_unreduced(&element);
 
@@ -702,6 +718,9 @@ mod tests {
     // one vector multiplication matches the serial product
     #[test]
     fn multiplication() {
+        if !is_supported() {
+            return;
+        }
         let left = big_element();
         let right = other_big_element();
         let expected = &left * &right;
@@ -718,6 +737,9 @@ mod tests {
     // a long chain of vector multiplications matches the serial chain
     #[test]
     fn iterated_multiplication() {
+        if !is_supported() {
+            return;
+        }
         let left = big_element();
         let right = other_big_element();
         let mut expected = &left * &right;
@@ -742,6 +764,9 @@ mod tests {
     // vector squaring matches vector multiplication by itself
     #[test]
     fn square() {
+        if !is_supported() {
+            return;
+        }
         let vector: F51x4Reduced = splat(&big_element()).into();
 
         let product = (&vector * &vector).split();
@@ -755,6 +780,9 @@ mod tests {
     // a long chain of vector squarings matches the serial chain
     #[test]
     fn iterated_square() {
+        if !is_supported() {
+            return;
+        }
         let mut element = big_element();
         let mut vector = splat(&element);
         for _ in 0..ROUNDS {
@@ -770,6 +798,9 @@ mod tests {
     // a long chain of multiplications by a small constant matches the serial chain
     #[test]
     fn small_multiplication() {
+        if !is_supported() {
+            return;
+        }
         let element = big_element();
         let constant = FieldElement51([SMALL_CONSTANT as u64, 0, 0, 0, 0]);
         let mut expected = &element * &constant;
@@ -796,6 +827,9 @@ mod tests {
     // the AAAA shuffle copies lane A into every lane
     #[test]
     fn shuffle() {
+        if !is_supported() {
+            return;
+        }
         let elements = distinct_elements();
         let vector = F51x4Unreduced::new(&elements[0], &elements[1], &elements[2], &elements[3]);
 
@@ -809,6 +843,9 @@ mod tests {
     // the AB blend takes lanes A and B from the second vector
     #[test]
     fn blend() {
+        if !is_supported() {
+            return;
+        }
         let elements = distinct_elements();
         let first = F51x4Unreduced::new(&elements[0], &elements[1], &elements[2], &elements[3]);
         let second = F51x4Unreduced::new(&elements[3], &elements[2], &elements[1], &elements[0]);

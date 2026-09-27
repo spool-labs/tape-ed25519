@@ -224,12 +224,16 @@ impl From<&edwards::EdwardsPoint> for NafLookupTable8<CachedPoint> {
     }
 }
 
-#[cfg(all(target_feature = "avx512ifma", target_feature = "avx512vl"))]
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::constants::{ED25519_BASEPOINT_POINT, ED25519_BASEPOINT_TABLE};
     use crate::scalar::Scalar;
+
+    /// Whether this CPU runs the backend under test, so other hosts skip it
+    fn is_supported() -> bool {
+        std::is_x86_feature_detected!("avx512ifma") && std::is_x86_feature_detected!("avx512vl")
+    }
 
     const MULTIPLIER: u64 = 8475983829;
 
@@ -259,6 +263,9 @@ mod tests {
     // vector addition and subtraction match the serial formulas on every pair of sample points
     #[test]
     fn addition() {
+        if !is_supported() {
+            return;
+        }
         for left in sample_points() {
             for right in sample_points() {
                 check_addition(left, right);
@@ -269,6 +276,9 @@ mod tests {
     // vector doubling matches serial addition of a point to itself
     #[test]
     fn doubling() {
+        if !is_supported() {
+            return;
+        }
         for point in sample_points() {
             check_doubling(point);
         }
